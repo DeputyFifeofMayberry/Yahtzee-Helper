@@ -150,6 +150,7 @@ class TurnRecord:
 class GameState:
     scorecard: Scorecard = field(default_factory=Scorecard)
     turn_index: int = 1
+    # Display-order dice for the active turn (preserves user-entered order).
     current_dice: list[int] = field(default_factory=lambda: [1, 1, 1, 1, 1])
     roll_number: int = 1
     history: list[TurnRecord] = field(default_factory=list)
