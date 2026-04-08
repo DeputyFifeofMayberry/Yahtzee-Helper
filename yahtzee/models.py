@@ -59,6 +59,41 @@ class Scorecard:
     def open_categories(self) -> list[Category]:
         return [c for c in ALL_CATEGORIES if self.scores[c] is None]
 
+    def filled_categories(self) -> list[Category]:
+        return [c for c in ALL_CATEGORIES if self.scores[c] is not None]
+
+    def filled_categories_signature(self) -> tuple[str, ...]:
+        return tuple(c.value for c in self.filled_categories())
+
+    def score_signature(self) -> tuple[tuple[int | None, ...], int]:
+        """Canonical exact board-state signature for advisory caching.
+
+        Includes each category score/unfilled state in fixed order and the
+        accumulated Yahtzee bonus, so materially different boards never collide.
+        """
+        return tuple(self.scores[c] for c in ALL_CATEGORIES), self.yahtzee_bonus
+
+    @classmethod
+    def from_signature(cls, signature: tuple[tuple[int | None, ...], int]) -> "Scorecard":
+        values, yahtzee_bonus = signature
+        if len(values) != len(ALL_CATEGORIES):
+            raise ValueError("Invalid scorecard signature length")
+        card = cls()
+        for cat, value in zip(ALL_CATEGORIES, values, strict=True):
+            card.scores[cat] = value
+        card.yahtzee_bonus = int(yahtzee_bonus)
+        return card
+
+    def legal_scoring_categories(self, dice: tuple[int, ...] | list[int]) -> list[Category]:
+        from yahtzee.scoring import legal_categories_for_roll
+
+        return legal_categories_for_roll(dice, self)
+
+    def legal_score_previews(self, dice: tuple[int, ...] | list[int]) -> dict[Category, int]:
+        from yahtzee.scoring import score_roll_in_category
+
+        return {cat: score_roll_in_category(dice, cat, self).score for cat in self.legal_scoring_categories(dice)}
+
     @property
     def upper_subtotal(self) -> int:
         return sum(self.scores[c] or 0 for c in UPPER_CATEGORIES)
@@ -152,6 +187,8 @@ class CandidateAction:
     held_dice: tuple[int, ...] | None = None
     category: Category | None = None
     expected_value: float = 0.0
+    exact_turn_ev: float = 0.0
+    board_adjustment: float = 0.0
     description: str = ""
     probabilities: dict[str, float] = field(default_factory=dict)
 
