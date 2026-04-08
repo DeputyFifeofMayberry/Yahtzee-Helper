@@ -6,7 +6,18 @@ from yahtzee.advisor import YahtzeeAdvisor
 from yahtzee.models import ALL_CATEGORIES, GameState, OptimizationObjective
 from yahtzee.persistence import load_game, save_game
 from yahtzee.state import GameManager
-from yahtzee.ui_state import TURN_DIE_KEYS, TURN_ROLL_KEY, commit_turn_widgets_to_manager, sync_turn_widgets_from_manager
+from yahtzee.ui_state import (
+    ENTRY_MODE_COUNTS,
+    ENTRY_MODE_QUICK,
+    TURN_ENTRY_MODE_KEY,
+    TURN_FACE_COUNT_KEYS,
+    TURN_QUICK_ENTRY_KEY,
+    TURN_ROLL_KEY,
+    commit_turn_draft_to_manager,
+    read_validated_turn_input,
+    seed_turn_draft_from_manager,
+    sync_turn_draft_after_authoritative_change,
+)
 
 st.set_page_config(page_title="Yahtzee Strategy Advisor", layout="wide")
 
@@ -20,7 +31,7 @@ if "objective" not in st.session_state:
 manager: GameManager = st.session_state.manager
 advisor: YahtzeeAdvisor = st.session_state.advisor
 
-sync_turn_widgets_from_manager(st.session_state, manager)
+seed_turn_draft_from_manager(st.session_state, manager)
 
 st.title("🎲 Yahtzee Strategy Advisor")
 st.caption("Exact reroll enumeration with selectable strategy objective and explicit Yahtzee-probability reporting.")
@@ -29,7 +40,7 @@ with st.sidebar:
     st.header("Game Controls")
     if st.button("New Game", use_container_width=True):
         st.session_state.manager = GameManager(GameState())
-        sync_turn_widgets_from_manager(st.session_state, st.session_state.manager, force=True)
+        sync_turn_draft_after_authoritative_change(st.session_state, st.session_state.manager)
         st.rerun()
 
     save_path = st.text_input("Save file", value="saved_games/yahtzee_game.json")
@@ -41,13 +52,13 @@ with st.sidebar:
     with c2:
         if st.button("Load", use_container_width=True):
             st.session_state.manager = GameManager(load_game(save_path))
-            sync_turn_widgets_from_manager(st.session_state, st.session_state.manager, force=True)
+            sync_turn_draft_after_authoritative_change(st.session_state, st.session_state.manager)
             st.success("Loaded")
             st.rerun()
 
     if st.button("Undo last action", use_container_width=True):
         if st.session_state.manager.undo():
-            sync_turn_widgets_from_manager(st.session_state, st.session_state.manager, force=True)
+            sync_turn_draft_after_authoritative_change(st.session_state, st.session_state.manager)
             st.success("Undid last action")
             st.rerun()
         else:
@@ -55,7 +66,7 @@ with st.sidebar:
 
     if st.button("Reset current turn", use_container_width=True):
         st.session_state.manager.reset_current_turn()
-        sync_turn_widgets_from_manager(st.session_state, st.session_state.manager, force=True)
+        sync_turn_draft_after_authoritative_change(st.session_state, st.session_state.manager)
         st.rerun()
 
     st.markdown("---")
@@ -86,17 +97,45 @@ left, right = st.columns([1.6, 1.1])
 
 with left:
     st.subheader(f"Turn {state.turn_index}")
-    dice_cols = st.columns(5)
-    for i, col in enumerate(dice_cols):
-        with col:
-            st.selectbox(f"Die {i + 1}", [1, 2, 3, 4, 5, 6], key=TURN_DIE_KEYS[i])
 
-    st.radio("Roll number", [1, 2, 3], horizontal=True, key=TURN_ROLL_KEY)
+    with st.form("turn_entry_form"):
+        st.radio("Roll number", [1, 2, 3], horizontal=True, key=TURN_ROLL_KEY)
+        st.radio("Entry mode", [ENTRY_MODE_QUICK, ENTRY_MODE_COUNTS], horizontal=True, key=TURN_ENTRY_MODE_KEY)
 
-    try:
-        commit_turn_widgets_to_manager(st.session_state, st.session_state.manager)
-    except ValueError as exc:
-        st.error(str(exc))
+        if st.session_state[TURN_ENTRY_MODE_KEY] == ENTRY_MODE_QUICK:
+            st.text_input(
+                "Dice",
+                key=TURN_QUICK_ENTRY_KEY,
+                help="Examples: 11116, 1 1 1 1 6, 1,1,1,1,6",
+            )
+        else:
+            face_cols = st.columns(6)
+            for idx, col in enumerate(face_cols):
+                with col:
+                    st.number_input(
+                        f"{idx + 1}",
+                        min_value=0,
+                        max_value=5,
+                        step=1,
+                        key=TURN_FACE_COUNT_KEYS[idx],
+                    )
+            selected_total = sum(int(st.session_state.get(key, 0)) for key in TURN_FACE_COUNT_KEYS)
+            st.caption(f"Dice selected: {selected_total} / 5")
+
+        try:
+            preview_dice, preview_roll = read_validated_turn_input(st.session_state)
+            st.caption(f"Resolved dice: {preview_dice} (roll {preview_roll})")
+        except ValueError as exc:
+            st.warning(f"Preview: {exc}")
+
+        apply_dice = st.form_submit_button("Apply Dice")
+
+    if apply_dice:
+        try:
+            commit_turn_draft_to_manager(st.session_state, st.session_state.manager)
+            st.rerun()
+        except ValueError as exc:
+            st.error(str(exc))
 
     objective: OptimizationObjective = st.session_state.objective
     rec = advisor.recommend(
@@ -137,7 +176,7 @@ with left:
     if st.button("Apply category", type="primary"):
         try:
             gained = st.session_state.manager.apply_score(selected)
-            sync_turn_widgets_from_manager(st.session_state, st.session_state.manager, force=True)
+            sync_turn_draft_after_authoritative_change(st.session_state, st.session_state.manager)
             st.success(f"Scored {gained} in {selected.value}")
             st.rerun()
         except ValueError as exc:
