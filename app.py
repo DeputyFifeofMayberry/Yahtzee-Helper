@@ -3,20 +3,26 @@ from __future__ import annotations
 import streamlit as st
 
 from yahtzee.advisor import YahtzeeAdvisor
-from yahtzee.models import ALL_CATEGORIES, GameState, OptimizationObjective
+from yahtzee.models import ALL_CATEGORIES, ActionType, GameState, OptimizationObjective
 from yahtzee.persistence import load_game, save_game
 from yahtzee.state import GameManager
 from yahtzee.ui_state import (
     ENTRY_MODE_COUNTS,
     ENTRY_MODE_QUICK,
+    STAGED_RECOMMENDED_ACTION_KEY,
     TURN_ENTRY_MODE_KEY,
     TURN_FACE_COUNT_KEYS,
     TURN_QUICK_ENTRY_KEY,
     TURN_ROLL_KEY,
+    clear_staged_recommended_action,
     commit_turn_draft_to_manager,
+    consume_pending_turn_draft_sync,
+    get_staged_recommended_action,
     read_validated_turn_input,
+    request_turn_draft_sync_from_manager,
     seed_turn_draft_from_manager,
-    sync_turn_draft_after_authoritative_change,
+    stage_recommended_hold,
+    build_hold_mask_for_current_dice,
 )
 
 st.set_page_config(page_title="Yahtzee Strategy Advisor", layout="wide")
@@ -27,11 +33,41 @@ if "advisor" not in st.session_state:
     st.session_state.advisor = YahtzeeAdvisor()
 if "objective" not in st.session_state:
     st.session_state.objective = OptimizationObjective.BOARD_UTILITY
+if STAGED_RECOMMENDED_ACTION_KEY not in st.session_state:
+    st.session_state[STAGED_RECOMMENDED_ACTION_KEY] = None
 
 manager: GameManager = st.session_state.manager
 advisor: YahtzeeAdvisor = st.session_state.advisor
 
 seed_turn_draft_from_manager(st.session_state, manager)
+consume_pending_turn_draft_sync(st.session_state)
+
+
+def refresh_turn_draft_and_rerun(*, clear_staged: bool = False) -> None:
+    if clear_staged:
+        clear_staged_recommended_action(st.session_state)
+    request_turn_draft_sync_from_manager(st.session_state, st.session_state.manager)
+    st.rerun()
+
+
+def render_die_marker(position: int, die_value: int, keep: bool) -> str:
+    marker = "✅ KEEP" if keep else "🔁 REROLL"
+    return f"<div style='border:1px solid #d9d9d9;border-radius:8px;padding:0.5rem;text-align:center;'><strong>Die {position}</strong><br/><span style='font-size:1.2rem;'>🎲 {die_value}</span><br/>{marker}</div>"
+
+
+def staged_action_matches_current_turn(staged: dict | None) -> bool:
+    if not staged:
+        return False
+    state = st.session_state.manager.state
+    return (
+        staged.get("turn_index") == state.turn_index
+        and staged.get("source_roll") == state.roll_number
+        and staged.get("source_dice") == state.current_dice
+    )
+
+
+if not staged_action_matches_current_turn(get_staged_recommended_action(st.session_state)):
+    clear_staged_recommended_action(st.session_state)
 
 st.title("🎲 Yahtzee Strategy Advisor")
 st.caption("Exact reroll enumeration with selectable strategy objective and explicit Yahtzee-probability reporting.")
@@ -40,8 +76,7 @@ with st.sidebar:
     st.header("Game Controls")
     if st.button("New Game", use_container_width=True):
         st.session_state.manager = GameManager(GameState())
-        sync_turn_draft_after_authoritative_change(st.session_state, st.session_state.manager)
-        st.rerun()
+        refresh_turn_draft_and_rerun(clear_staged=True)
 
     save_path = st.text_input("Save file", value="saved_games/yahtzee_game.json")
     c1, c2 = st.columns(2)
@@ -52,22 +87,19 @@ with st.sidebar:
     with c2:
         if st.button("Load", use_container_width=True):
             st.session_state.manager = GameManager(load_game(save_path))
-            sync_turn_draft_after_authoritative_change(st.session_state, st.session_state.manager)
             st.success("Loaded")
-            st.rerun()
+            refresh_turn_draft_and_rerun(clear_staged=True)
 
     if st.button("Undo last action", use_container_width=True):
         if st.session_state.manager.undo():
-            sync_turn_draft_after_authoritative_change(st.session_state, st.session_state.manager)
             st.success("Undid last action")
-            st.rerun()
+            refresh_turn_draft_and_rerun(clear_staged=True)
         else:
             st.warning("Nothing to undo")
 
     if st.button("Reset current turn", use_container_width=True):
         st.session_state.manager.reset_current_turn()
-        sync_turn_draft_after_authoritative_change(st.session_state, st.session_state.manager)
-        st.rerun()
+        refresh_turn_draft_and_rerun(clear_staged=True)
 
     st.markdown("---")
     st.subheader("Strategy Mode")
@@ -133,6 +165,7 @@ with left:
     if apply_dice:
         try:
             commit_turn_draft_to_manager(st.session_state, st.session_state.manager)
+            clear_staged_recommended_action(st.session_state)
             st.rerun()
         except ValueError as exc:
             st.error(str(exc))
@@ -147,6 +180,69 @@ with left:
 
     st.subheader("Recommendation")
     st.success(f"Best action: {rec.best_action.description}")
+
+    st.markdown("#### Apply recommended action")
+    if rec.best_action.action_type == ActionType.SCORE_NOW and rec.best_action.category is not None:
+        recommended_score = state.scorecard.legal_score_previews(state.current_dice).get(rec.best_action.category)
+        score_label = (
+            f"Score {rec.best_action.category.value} now for {recommended_score}"
+            if recommended_score is not None
+            else f"Score {rec.best_action.category.value} now"
+        )
+        if st.button(score_label, key="apply_recommended_score", type="primary", use_container_width=True):
+            try:
+                gained = st.session_state.manager.apply_score(rec.best_action.category)
+                st.success(f"Scored {gained} in {rec.best_action.category.value}")
+                refresh_turn_draft_and_rerun(clear_staged=True)
+            except ValueError as exc:
+                st.error(str(exc))
+
+    if rec.best_action.action_type == ActionType.HOLD_AND_REROLL and rec.best_action.held_dice is not None:
+        with st.container(border=True):
+            held = list(rec.best_action.held_dice)
+            reroll_count = 5 - len(held)
+            st.write(f"Keep **{held if held else 'no dice'}** and reroll **{reroll_count}** dice.")
+
+            staged = get_staged_recommended_action(st.session_state)
+            keep_mask = staged.get("keep_mask") if staged_action_matches_current_turn(staged) else None
+            if not keep_mask:
+                try:
+                    keep_mask = build_hold_mask_for_current_dice(list(state.current_dice), rec.best_action.held_dice)
+                except ValueError as exc:
+                    st.error(str(exc))
+                    keep_mask = [False] * 5
+
+            cols = st.columns(5)
+            for idx, col in enumerate(cols):
+                with col:
+                    st.markdown(render_die_marker(idx + 1, state.current_dice[idx], bool(keep_mask[idx])), unsafe_allow_html=True)
+
+            c1, c2 = st.columns(2)
+            with c1:
+                if st.button("Use recommended hold", key="use_recommended_hold", type="primary", use_container_width=True):
+                    try:
+                        staged_payload = stage_recommended_hold(
+                            st.session_state,
+                            turn_index=state.turn_index,
+                            current_dice=list(state.current_dice),
+                            current_roll=state.roll_number,
+                            held_dice=rec.best_action.held_dice,
+                        )
+                        next_roll = int(staged_payload["next_roll"])
+                        st.session_state.manager.set_current_roll(list(state.current_dice), next_roll)
+                        request_turn_draft_sync_from_manager(st.session_state, st.session_state.manager)
+                        st.rerun()
+                    except ValueError as exc:
+                        st.error(str(exc))
+            with c2:
+                if st.button("Clear staged hold", key="clear_recommended_hold", use_container_width=True):
+                    clear_staged_recommended_action(st.session_state)
+                    st.rerun()
+
+            if staged_action_matches_current_turn(get_staged_recommended_action(st.session_state)):
+                st.success("Recommended hold staged. Keep marked dice and reroll the others in real life.")
+                st.info("Keep the marked dice, reroll the others in real life, then enter the new 5-die result above and click Apply Dice.")
+
     st.write(f"Objective optimized: **{objective.value}**")
     st.write(rec.explanation)
     st.write(f"Best score-now fallback: **{rec.best_stop_category.value}** ({rec.best_stop_score})")
@@ -176,9 +272,8 @@ with left:
     if st.button("Apply category", type="primary"):
         try:
             gained = st.session_state.manager.apply_score(selected)
-            sync_turn_draft_after_authoritative_change(st.session_state, st.session_state.manager)
             st.success(f"Scored {gained} in {selected.value}")
-            st.rerun()
+            refresh_turn_draft_and_rerun(clear_staged=True)
         except ValueError as exc:
             st.error(str(exc))
 
