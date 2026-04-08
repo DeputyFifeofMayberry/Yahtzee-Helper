@@ -4,7 +4,6 @@ from collections import Counter
 from functools import lru_cache
 from itertools import product
 
-from yahtzee.models import Category
 from yahtzee.rules import is_full_house, is_large_straight, is_n_of_a_kind, is_small_straight, is_yahtzee
 
 
@@ -19,34 +18,34 @@ def reroll_distribution(num_dice: int) -> dict[tuple[int, ...], float]:
     return {k: v / total for k, v in outcomes.items()}
 
 
-def final_outcome_distribution(held: tuple[int, ...], rerolls_left: int) -> dict[tuple[int, ...], float]:
-    if rerolls_left == 0:
-        return {tuple(sorted(held)): 1.0}
-    missing = 5 - len(held)
-    dist = reroll_distribution(missing)
-    if rerolls_left == 1:
-        return {tuple(sorted(held + outcome)): p for outcome, p in dist.items()}
-    # Only used for probability reporting, not optimal decision chaining.
-    merged: Counter[tuple[int, ...]] = Counter()
-    for outcome, p in dist.items():
-        dice = tuple(sorted(held + outcome))
-        merged[dice] += p
-    return dict(merged)
+def classify_final_dice(dice: tuple[int, ...]) -> str:
+    """Mutually exclusive end-of-turn outcome class for probability reporting."""
+    if is_yahtzee(dice):
+        return "Yahtzee"
+    if is_large_straight(dice):
+        return "Large Straight"
+    if is_full_house(dice):
+        return "Full House"
+    if is_n_of_a_kind(dice, 4):
+        return "Four of a Kind"
+    if is_small_straight(dice):
+        return "Small Straight"
+    if is_n_of_a_kind(dice, 3):
+        return "Three of a Kind"
+    return "Other"
 
 
-def category_probability(dist: dict[tuple[int, ...], float], category: Category) -> float:
-    total = 0.0
-    for dice, p in dist.items():
-        if category == Category.YAHTZEE and is_yahtzee(dice):
-            total += p
-        elif category == Category.FULL_HOUSE and is_full_house(dice):
-            total += p
-        elif category == Category.SMALL_STRAIGHT and is_small_straight(dice):
-            total += p
-        elif category == Category.LARGE_STRAIGHT and is_large_straight(dice):
-            total += p
-        elif category == Category.THREE_KIND and is_n_of_a_kind(dice, 3):
-            total += p
-        elif category == Category.FOUR_KIND and is_n_of_a_kind(dice, 4):
-            total += p
-    return total
+def outcome_class_distribution(final_dice_dist: dict[tuple[int, ...], float]) -> dict[str, float]:
+    classes = [
+        "Yahtzee",
+        "Large Straight",
+        "Full House",
+        "Four of a Kind",
+        "Small Straight",
+        "Three of a Kind",
+        "Other",
+    ]
+    totals = {key: 0.0 for key in classes}
+    for dice, probability in final_dice_dist.items():
+        totals[classify_final_dice(dice)] += probability
+    return totals

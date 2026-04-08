@@ -3,7 +3,7 @@ from __future__ import annotations
 from copy import deepcopy
 
 from yahtzee.models import Category, GameState, TurnRecord
-from yahtzee.scoring import score_with_scorecard
+from yahtzee.scoring import score_roll_in_category
 from yahtzee.utils import canonical_dice
 
 
@@ -22,9 +22,10 @@ class GameManager:
         if self.state.scorecard.is_filled(category):
             raise ValueError(f"Category already filled: {category.value}")
         self._undo_stack.append(deepcopy(self.state))
-        score, ybonus = score_with_scorecard(self.state.current_dice, category, self.state.scorecard)
-        self.state.scorecard.scores[category] = score
-        self.state.scorecard.yahtzee_bonus += ybonus
+        result = score_roll_in_category(self.state.current_dice, category, self.state.scorecard)
+        self.state.scorecard.scores[category] = result.score
+        self.state.scorecard.yahtzee_bonus += result.yahtzee_bonus_awarded
+        score = result.score
         self.state.history.append(
             TurnRecord(
                 dice=list(self.state.current_dice),

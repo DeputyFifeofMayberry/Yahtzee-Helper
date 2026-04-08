@@ -3,7 +3,7 @@ from __future__ import annotations
 import streamlit as st
 
 from yahtzee.advisor import YahtzeeAdvisor
-from yahtzee.models import ALL_CATEGORIES, Category, GameState
+from yahtzee.models import ALL_CATEGORIES, GameState
 from yahtzee.persistence import load_game, save_game
 from yahtzee.state import GameManager
 
@@ -18,7 +18,9 @@ manager: GameManager = st.session_state.manager
 advisor: YahtzeeAdvisor = st.session_state.advisor
 
 st.title("🎲 Yahtzee Strategy Advisor")
-st.caption("Exact turn-level odds + board-aware utility recommendations for standard Yahtzee.")
+st.caption(
+    "Exact turn-level continuation EV for rerolls, plus a separate board-aware utility adjustment for final ranking."
+)
 
 with st.sidebar:
     st.header("Game Controls")
@@ -72,24 +74,31 @@ with left:
     except ValueError as exc:
         st.error(str(exc))
 
-    rec = advisor.recommend(st.session_state.manager.state.current_dice, st.session_state.manager.state.roll_number, st.session_state.manager.state.scorecard)
+    rec = advisor.recommend(
+        st.session_state.manager.state.current_dice,
+        st.session_state.manager.state.roll_number,
+        st.session_state.manager.state.scorecard,
+    )
 
     st.subheader("Recommendation")
     st.success(f"Best action: {rec.best_action.description}")
     st.write(rec.explanation)
-    st.write(f"Best score-now category: **{rec.best_stop_category.value}** ({rec.best_stop_score})")
+    st.write(f"Best score-now fallback: **{rec.best_stop_category.value}** ({rec.best_stop_score})")
 
     st.markdown("#### Top 3 options")
     for i, action in enumerate(rec.top_actions, start=1):
-        st.write(f"{i}. {action.description} | EV utility: {action.expected_value:.2f}")
+        st.write(
+            f"{i}. {action.description} | Final utility: {action.expected_value:.2f} "
+            f"(exact turn EV: {action.exact_turn_ev:.2f}, board adj: {action.board_adjustment:+.2f})"
+        )
 
-    if rec.best_action.probabilities:
-        st.markdown("#### Key outcome probabilities (from recommended hold)")
-        st.table({"Outcome": list(rec.best_action.probabilities.keys()), "Probability": [f"{v:.1%}" for v in rec.best_action.probabilities.values()]})
+    if rec.best_action.action_type.value == "HOLD_AND_REROLL" and rec.best_action.probabilities:
+        st.markdown("#### Exact end-of-turn outcome classes (recommended hold)")
+        st.table({"Outcome Class": list(rec.best_action.probabilities.keys()), "Probability": [f"{v:.1%}" for v in rec.best_action.probabilities.values()]})
 
     st.markdown("#### Apply score")
-    open_categories = st.session_state.manager.state.scorecard.open_categories()
-    selected = st.selectbox("Category", open_categories, format_func=lambda c: c.value)
+    legal_categories = st.session_state.manager.state.scorecard.legal_scoring_categories(state.current_dice)
+    selected = st.selectbox("Category", legal_categories, format_func=lambda c: c.value)
     if st.button("Apply category", type="primary"):
         try:
             gained = st.session_state.manager.apply_score(selected)

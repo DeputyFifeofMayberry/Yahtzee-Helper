@@ -1,10 +1,19 @@
 from __future__ import annotations
 
-from yahtzee.models import Category, Scorecard, UPPER_CATEGORIES
+from dataclasses import dataclass
+
+from yahtzee.models import ALL_CATEGORIES, Category, LOWER_CATEGORIES, Scorecard, UPPER_CATEGORIES
 from yahtzee.rules import is_full_house, is_large_straight, is_n_of_a_kind, is_small_straight, is_yahtzee
 
 
-def category_score(dice: tuple[int, ...] | list[int], category: Category, joker_active: bool = False) -> int:
+@dataclass(frozen=True)
+class ScoringResult:
+    score: int
+    yahtzee_bonus_awarded: int
+    joker_active: bool
+
+
+def raw_category_score(dice: tuple[int, ...] | list[int], category: Category, joker_active: bool = False) -> int:
     total = sum(dice)
     if category == Category.ONES:
         return sum(d for d in dice if d == 1)
@@ -40,19 +49,68 @@ def joker_forced_upper_category(dice: tuple[int, ...] | list[int]) -> Category:
     return UPPER_CATEGORIES[pip - 1]
 
 
-def score_with_scorecard(dice: tuple[int, ...] | list[int], category: Category, scorecard: Scorecard) -> tuple[int, int]:
-    """Return (score, yahtzee_bonus_awarded)."""
-    yahtzee = is_yahtzee(dice)
+def legal_categories_for_roll(dice: tuple[int, ...] | list[int], scorecard: Scorecard) -> list[Category]:
+    """Return legal categories for this final roll under standard Yahtzee + Joker rule.
+
+    Behavior implemented:
+    - Yahtzee box not scored 50 yet (open or 0): no extra Yahtzee bonus/Joker override.
+      Any open category is legal.
+    - Extra Yahtzee when Yahtzee box is 50:
+      * matching upper box open => forced to that upper category.
+      * matching upper closed => may score in any open lower category using Joker semantics;
+        if all lower categories are filled, any open upper category is legal.
+    """
+    open_categories = scorecard.open_categories()
+    if not is_yahtzee(dice):
+        return open_categories
+
     yahtzee_box = scorecard.scores[Category.YAHTZEE]
-    yahtzee_bonus = 0
+    if yahtzee_box != 50:
+        return open_categories
 
-    joker_active = False
-    if yahtzee and yahtzee_box == 50:
-        yahtzee_bonus = 100
-        forced_upper = joker_forced_upper_category(dice)
-        if scorecard.scores[forced_upper] is None and category != forced_upper:
-            raise ValueError(f"Joker rule: must score in {forced_upper.value} while open.")
-        joker_active = category not in UPPER_CATEGORIES
+    forced_upper = joker_forced_upper_category(dice)
+    if not scorecard.is_filled(forced_upper):
+        return [forced_upper]
 
-    score = category_score(dice, category, joker_active=joker_active)
-    return score, yahtzee_bonus
+    open_lower = [c for c in LOWER_CATEGORIES if not scorecard.is_filled(c)]
+    if open_lower:
+        return open_lower
+
+    return [c for c in UPPER_CATEGORIES if not scorecard.is_filled(c)]
+
+
+def score_roll_in_category(dice: tuple[int, ...] | list[int], category: Category, scorecard: Scorecard) -> ScoringResult:
+    if category not in ALL_CATEGORIES:
+        raise ValueError(f"Unsupported category: {category}")
+    if scorecard.is_filled(category):
+        raise ValueError(f"Category already filled: {category.value}")
+
+    legal_categories = legal_categories_for_roll(dice, scorecard)
+    if category not in legal_categories:
+        legal_names = ", ".join(c.value for c in legal_categories)
+        raise ValueError(f"Illegal category for roll. Legal options: {legal_names}")
+
+    yahtzee_bonus = 100 if is_yahtzee(dice) and scorecard.scores[Category.YAHTZEE] == 50 else 0
+    forced_upper = joker_forced_upper_category(dice) if is_yahtzee(dice) else None
+    joker_active = (
+        yahtzee_bonus > 0
+        and forced_upper is not None
+        and scorecard.is_filled(forced_upper)
+        and category in LOWER_CATEGORIES
+    )
+
+    return ScoringResult(
+        score=raw_category_score(dice, category, joker_active=joker_active),
+        yahtzee_bonus_awarded=yahtzee_bonus,
+        joker_active=joker_active,
+    )
+
+
+# Backward-compatible aliases for existing imports.
+def category_score(dice: tuple[int, ...] | list[int], category: Category, joker_active: bool = False) -> int:
+    return raw_category_score(dice, category, joker_active=joker_active)
+
+
+def score_with_scorecard(dice: tuple[int, ...] | list[int], category: Category, scorecard: Scorecard) -> tuple[int, int]:
+    result = score_roll_in_category(dice, category, scorecard)
+    return result.score, result.yahtzee_bonus_awarded

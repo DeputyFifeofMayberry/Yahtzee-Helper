@@ -23,3 +23,15 @@ def test_save_load(tmp_path: Path):
     save_game(m.state, str(p))
     loaded = load_game(str(p))
     assert loaded.scorecard.scores[Category.YAHTZEE] == 50
+
+
+def test_backward_compatible_load_missing_new_fields(tmp_path: Path):
+    p = tmp_path / "legacy.json"
+    p.write_text(
+        '{"scorecard":{"scores":{"Yahtzee":50}},"turn_index":2,"current_dice":[1,1,1,1,1],"roll_number":1,"history":[]}',
+        encoding="utf-8",
+    )
+    loaded = load_game(str(p))
+    assert loaded.turn_index == 2
+    assert loaded.scorecard.scores[Category.YAHTZEE] == 50
+    assert loaded.scorecard.yahtzee_bonus == 0
