@@ -4,11 +4,16 @@ from yahtzee.ui_state import (
     ENTRY_MODE_COUNTS,
     ENTRY_MODE_QUICK,
     TURN_DRAFT_KEYS,
+    TURN_DRAFT_PENDING_SYNC_KEY,
+    TURN_DRAFT_SYNC_REQUESTED_KEY,
     TURN_ENTRY_MODE_KEY,
     TURN_FACE_COUNT_KEYS,
     TURN_QUICK_ENTRY_KEY,
     TURN_ROLL_KEY,
+    build_hold_mask_for_current_dice,
     commit_turn_draft_to_manager,
+    consume_pending_turn_draft_sync,
+    request_turn_draft_sync_from_manager,
     seed_turn_draft_from_manager,
 )
 
@@ -58,6 +63,38 @@ def test_force_seed_overwrites_from_manager_state():
     assert session_state[TURN_QUICK_ENTRY_KEY] == "2 2 2 2 2"
     assert session_state[TURN_ROLL_KEY] == 2
     assert [session_state[key] for key in TURN_FACE_COUNT_KEYS] == [0, 5, 0, 0, 0, 0]
+
+
+def test_deferred_sync_requests_and_consumes_widget_values():
+    manager = GameManager(GameState(current_dice=[2, 3, 4, 5, 6], roll_number=3))
+    session_state: dict[str, int | str | dict[str, int | str] | bool] = {}
+    seed_turn_draft_from_manager(session_state, GameManager(GameState(current_dice=[1, 1, 1, 1, 1], roll_number=1)))
+
+    request_turn_draft_sync_from_manager(session_state, manager)
+
+    assert session_state[TURN_DRAFT_SYNC_REQUESTED_KEY] is True
+    assert TURN_DRAFT_PENDING_SYNC_KEY in session_state
+
+    consume_pending_turn_draft_sync(session_state)
+
+    assert session_state[TURN_ROLL_KEY] == 3
+    assert session_state[TURN_QUICK_ENTRY_KEY] == "2 3 4 5 6"
+    assert session_state[TURN_DRAFT_SYNC_REQUESTED_KEY] is False
+    assert TURN_DRAFT_PENDING_SYNC_KEY not in session_state
+
+
+def test_build_hold_mask_is_duplicate_safe():
+    mask = build_hold_mask_for_current_dice([1, 1, 1, 1, 6], (1, 1, 1, 1))
+    assert mask == [True, True, True, True, False]
+
+
+def test_build_hold_mask_requires_subset():
+    try:
+        build_hold_mask_for_current_dice([1, 1, 2, 3, 4], (1, 1, 1))
+    except ValueError as exc:
+        assert "subset" in str(exc)
+    else:
+        raise AssertionError("Expected ValueError for invalid held dice")
 
 
 def test_commit_writes_parsed_dice_and_roll_number_to_manager_state():
