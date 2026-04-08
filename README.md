@@ -4,18 +4,81 @@ A local Streamlit app that helps you play a full game of standard 5-dice Yahtzee
 
 ## What the app does
 
-- Tracks a full 13-category Yahtzee scorecard
-- Lets you enter current 5 dice and roll number (1/2/3)
-- Recommends the best immediate action:
-  - hold dice and reroll, or
-  - score now in a legal category
+- Tracks a full 13-category Yahtzee scorecard.
+- Lets you enter current 5 dice and roll number (1/2/3).
+- Recommends the best immediate action (hold+reraoll or score now) under a selected optimization objective.
 - Shows top 3 options with:
-  - exact turn-level continuation EV (for rerolls)
-  - board-aware utility adjustment
-  - final ranking utility
-- Shows exact end-of-turn outcome-class probabilities for the recommended hold
-- Applies selected scores with legality checks, updates totals, supports undo
-- Saves/loads game state as local JSON
+  - objective value,
+  - exact turn EV,
+  - board-aware utility,
+  - Yahtzee probability for that option.
+- Shows exact end-of-turn outcome-class probabilities for the recommended policy line.
+- Shows both:
+  - Yahtzee probability under the currently recommended line, and
+  - maximum possible Yahtzee probability from the current state.
+- Applies selected scores with legality checks, updates totals, supports undo.
+- Saves/loads game state as local JSON.
+
+## Strategy modes (what is optimized)
+
+The app supports three explicit optimization objectives:
+
+1. **Board-aware utility** (`BOARD_UTILITY`)
+   - Primary objective: board-adjusted utility.
+   - Uses exact turn EV plus scorecard-aware adjustments.
+
+2. **Exact turn EV** (`EXACT_TURN_EV`)
+   - Primary objective: expected points scored this turn (exact enumeration).
+   - No board-adjusted objective priority.
+
+3. **Maximize Yahtzee probability** (`MAXIMIZE_YAHTZEE_PROBABILITY`)
+   - Primary objective: highest probability of ending the turn with a Yahtzee.
+   - Still uses exact reroll enumeration (no Monte Carlo).
+
+The same objective is used consistently at top-level recommendation, recursive continuation choice, and final outcome distribution reporting.
+
+## What is exact vs heuristic
+
+### Exact
+
+- Exact reroll outcome enumeration for 0..5 rerolled dice (no Monte Carlo).
+- Exact continuation recursion over remaining rerolls.
+- Exact policy-consistent continuation selection for each objective.
+- Exact scorecard-state cache signature with all category values + Yahtzee bonus.
+- Exact legality checks, including Joker placement constraints.
+- Exact Yahtzee-chase probabilities:
+  - under the selected recommendation line,
+  - and maximum possible from the current state.
+
+### Heuristic / model-based
+
+- **Only** the board-aware utility objective applies heuristic shaping.
+- That objective is intentionally scorecard-aware and practical, but it is not a full-game optimal dynamic program over all 13 future turns.
+
+## Yahtzee probability semantics
+
+The displayed Yahtzee percentages have two different meanings:
+
+- **Yahtzee probability (recommended line):**
+  Probability of ending this turn with Yahtzee if you follow the currently selected recommendation policy.
+
+- **Maximum possible Yahtzee probability from this state:**
+  Best achievable Yahtzee chance from this same state if you optimize specifically for Yahtzee probability.
+
+These can differ intentionally. For example, board-aware utility may prefer a hold with slightly lower Yahtzee chance but better expected scoring utility.
+
+### Concrete example
+
+State:
+- roll = `[1, 1, 1, 1, 6]`
+- roll number = `1` (two rerolls remaining)
+- empty scorecard
+
+In **Maximize Yahtzee probability** mode, the optimal line is to hold four 1s and reroll the sixth die on both remaining rolls if needed.
+
+Resulting Yahtzee probability is:
+
+- `11/36 = 0.3055555555555556`
 
 ## Official rule interpretation implemented
 
@@ -49,38 +112,28 @@ When a Yahtzee is rolled and the Yahtzee box is already filled, this app applies
 Joker placement constraints:
 
 - If the matching upper category is open, it is the **only legal category**.
-- If matching upper is filled and any lower category is open, legal choices are **exactly open lower categories**, scored with Joker semantics:
-  - Three/Four of a Kind: total of all 5 dice
-  - Full House: 25
-  - Small Straight: 30
-  - Large Straight: 40
-  - Chance: total of all 5 dice
+- If matching upper is filled and any lower category is open, legal choices are **exactly open lower categories**, scored with Joker semantics.
 - If matching upper is filled and all lower categories are filled, legal choices are **exactly open upper categories**.
-  - Matching upper scores normal pip total.
-  - Non-matching open upper categories score 0.
 
-If the Yahtzee box is still unfilled and you roll a Yahtzee, no extra-Yahtzee bonus/Joker override is used yet; normal category selection applies.
+## UI state integrity fix
 
-## What is exact vs heuristic
+Turn-entry widgets now use explicit, stable session-state keys:
 
-### Exact
+- `turn_die_1` .. `turn_die_5`
+- `turn_roll_number`
 
-- Exact reroll outcome enumeration (no Monte Carlo) for 0..5 rerolled dice.
-- Exact turn-level continuation search over remaining rerolls.
-- Exact recommended-hold end-of-turn probability classes under optimal continuation.
-- Exact scorecard-state cache signature using every category score/unfilled state + Yahtzee bonus.
-- Exact legality gating for score-now choices under ordinary and Joker contexts.
+State ownership is explicit:
 
-### Heuristic (board-aware)
+- Widget state owns in-progress turn input during normal interaction.
+- Backend manager state syncs into widget state **only** at authoritative sync points:
+  - initial load,
+  - New Game,
+  - Load,
+  - Undo,
+  - Reset current turn,
+  - Apply category.
 
-- Final action ranking uses a board-aware utility layer in addition to exact turn EV.
-- Utility adjustments are grounded in category baselines and upper-section progress, but this is not a full 13-turn optimal dynamic program.
-
-## Limitations
-
-- Not a proven full-game optimal solver across all 13 future turns.
-- Utility calibration is principled but still model-based.
-- Outcome classes summarize hand types, not full category score distributions.
+This prevents the previous first-click bounce-back/false-input issue caused by reruns repeatedly rebuilding widget defaults from backend state.
 
 ## Install
 

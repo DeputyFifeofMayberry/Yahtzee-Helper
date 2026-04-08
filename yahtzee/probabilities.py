@@ -7,6 +7,10 @@ from itertools import product
 from yahtzee.rules import is_full_house, is_large_straight, is_n_of_a_kind, is_small_straight, is_yahtzee
 
 
+def is_yahtzee_dice(dice: tuple[int, ...]) -> bool:
+    return is_yahtzee(dice)
+
+
 @lru_cache(maxsize=None)
 def reroll_distribution(num_dice: int) -> dict[tuple[int, ...], float]:
     if num_dice < 0 or num_dice > 5:
