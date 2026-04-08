@@ -1,5 +1,7 @@
 from yahtzee.advisor import YahtzeeAdvisor
 from yahtzee.models import ActionType, Category, Scorecard
+from yahtzee.rules import legal_categories_for_roll
+from yahtzee.state import GameManager
 
 
 def test_triple_sixes_preferred_hold():
@@ -50,3 +52,34 @@ def test_roll1_distribution_uses_two_step_optimal_continuation():
     one_step = advisor.optimal_turn_outcome_probabilities((6, 6, 6), 1, sc)
     two_step = advisor.optimal_turn_outcome_probabilities((6, 6, 6), 2, sc)
     assert two_step["Yahtzee"] > one_step["Yahtzee"]
+
+
+def test_advisor_score_now_never_recommends_illegal_joker_category():
+    advisor = YahtzeeAdvisor()
+    sc = Scorecard()
+    sc.scores[Category.YAHTZEE] = 50
+    rec = advisor.recommend([6, 6, 6, 6, 6], 3, sc)
+    assert rec.best_action.category == Category.SIXES
+    assert rec.best_action.category in legal_categories_for_roll((6, 6, 6, 6, 6), sc)
+
+
+def test_game_manager_rejects_illegal_joker_apply_path():
+    manager = GameManager()
+    manager.state.scorecard.scores[Category.YAHTZEE] = 50
+    manager.set_current_roll([6, 6, 6, 6, 6], 3)
+    try:
+        manager.apply_score(Category.CHANCE)
+        assert False, "expected illegal category to be rejected"
+    except ValueError as exc:
+        assert "Illegal category for roll" in str(exc)
+
+
+def test_roll3_recommendation_category_is_legal_in_joker_state():
+    advisor = YahtzeeAdvisor()
+    sc = Scorecard()
+    sc.scores[Category.YAHTZEE] = 0
+    sc.scores[Category.TWOS] = 6
+    rec = advisor.recommend([2, 2, 2, 2, 2], 3, sc)
+    assert rec.best_action.action_type == ActionType.SCORE_NOW
+    legal = legal_categories_for_roll((2, 2, 2, 2, 2), sc)
+    assert rec.best_action.category in legal

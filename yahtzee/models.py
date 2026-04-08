@@ -62,6 +62,12 @@ class Scorecard:
     def filled_categories(self) -> list[Category]:
         return [c for c in ALL_CATEGORIES if self.scores[c] is not None]
 
+    def open_upper_categories(self) -> list[Category]:
+        return [c for c in UPPER_CATEGORIES if self.scores[c] is None]
+
+    def open_lower_categories(self) -> list[Category]:
+        return [c for c in LOWER_CATEGORIES if self.scores[c] is None]
+
     def filled_categories_signature(self) -> tuple[str, ...]:
         return tuple(c.value for c in self.filled_categories())
 
@@ -85,7 +91,7 @@ class Scorecard:
         return card
 
     def legal_scoring_categories(self, dice: tuple[int, ...] | list[int]) -> list[Category]:
-        from yahtzee.scoring import legal_categories_for_roll
+        from yahtzee.rules import legal_categories_for_roll
 
         return legal_categories_for_roll(dice, self)
 
