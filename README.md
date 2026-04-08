@@ -17,23 +17,49 @@ A local Streamlit app that helps you play a full game of standard 5-dice Yahtzee
 - Applies selected scores with legality checks, updates totals, supports undo
 - Saves/loads game state as local JSON
 
-## Rules interpretation (explicit)
+## Official rule interpretation implemented
 
-This app implements standard Yahtzee:
+This app implements standard Hasbro Yahtzee scoring and legality behavior:
 
-- 5d6, up to 3 rolls per turn
-- 13 standard categories
-- Upper bonus +35 at upper subtotal >= 63
+- 5 dice, up to 3 rolls per turn
+- 13-turn game, one score box must be filled each turn
+- Filled score boxes cannot be reused
+- Upper section categories score matching pips
+- Upper bonus is +35 when upper subtotal is 63 or higher
+- Lower section scoring:
+  - Three of a Kind: total of all 5 dice if legal, else 0
+  - Four of a Kind: total of all 5 dice if legal, else 0
+  - Full House: 25
+  - Small Straight: 30
+  - Large Straight: 40
+  - Yahtzee: 50
+  - Chance: total of all 5 dice
 
-### Yahtzee + Joker handling
+### Extra Yahtzee and Joker handling
 
-- First Yahtzee can be scored in Yahtzee for 50.
-- If Yahtzee category is **50**, each additional Yahtzee gives **+100** Yahtzee bonus.
-- On additional Yahtzee with Yahtzee category = 50:
-  - If matching upper category is open, you are forced to score there.
-  - If matching upper category is closed, legal choices are open lower categories with Joker semantics.
-  - If all lower categories are filled, any open upper category is legal.
-- If Yahtzee category is **0** (or still unfilled), extra Yahtzee/Joker override is not active.
+When a Yahtzee is rolled and the Yahtzee box is already filled, this app applies official Joker placement order:
+
+1. **If Yahtzee box is 50**
+   - Award +100 Yahtzee bonus.
+   - Then apply Joker placement constraints below.
+2. **If Yahtzee box is 0**
+   - Do **not** award +100 bonus.
+   - Still apply Joker placement constraints below.
+
+Joker placement constraints:
+
+- If the matching upper category is open, it is the **only legal category**.
+- If matching upper is filled and any lower category is open, legal choices are **exactly open lower categories**, scored with Joker semantics:
+  - Three/Four of a Kind: total of all 5 dice
+  - Full House: 25
+  - Small Straight: 30
+  - Large Straight: 40
+  - Chance: total of all 5 dice
+- If matching upper is filled and all lower categories are filled, legal choices are **exactly open upper categories**.
+  - Matching upper scores normal pip total.
+  - Non-matching open upper categories score 0.
+
+If the Yahtzee box is still unfilled and you roll a Yahtzee, no extra-Yahtzee bonus/Joker override is used yet; normal category selection applies.
 
 ## What is exact vs heuristic
 
@@ -43,19 +69,12 @@ This app implements standard Yahtzee:
 - Exact turn-level continuation search over remaining rerolls.
 - Exact recommended-hold end-of-turn probability classes under optimal continuation.
 - Exact scorecard-state cache signature using every category score/unfilled state + Yahtzee bonus.
+- Exact legality gating for score-now choices under ordinary and Joker contexts.
 
 ### Heuristic (board-aware)
 
 - Final action ranking uses a board-aware utility layer in addition to exact turn EV.
 - Utility adjustments are grounded in category baselines and upper-section progress, but this is not a full 13-turn optimal dynamic program.
-
-## How to interpret the recommendation panel
-
-- **Best action**: highest board-aware utility.
-- **Exact turn EV**: exact expected raw turn score for that action under continuation model.
-- **Board adjustment**: utility delta from board context.
-- **Best score-now fallback**: best legal immediate scoring category if you stop now.
-- **Outcome classes table**: exact probability of finishing the turn in each mutually exclusive class for the recommended hold.
 
 ## Limitations
 

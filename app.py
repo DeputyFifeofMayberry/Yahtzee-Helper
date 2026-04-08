@@ -53,7 +53,7 @@ with st.sidebar:
 
     st.markdown("---")
     st.subheader("Rules summary")
-    st.write("13 categories, 3 rolls per turn, upper bonus +35 at 63, Yahtzee bonuses +100 with Joker rule.")
+    st.write("13 turns, 3 rolls per turn, one box filled each turn, upper bonus +35 at 63+, with official extra-Yahtzee Joker placement rules.")
 
 state = st.session_state.manager.state
 
