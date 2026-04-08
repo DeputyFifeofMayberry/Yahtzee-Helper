@@ -35,3 +35,24 @@ def test_backward_compatible_load_missing_new_fields(tmp_path: Path):
     assert loaded.turn_index == 2
     assert loaded.scorecard.scores[Category.YAHTZEE] == 50
     assert loaded.scorecard.yahtzee_bonus == 0
+
+
+def test_save_load_preserves_current_visible_dice_order(tmp_path: Path):
+    p = tmp_path / "visible-order.json"
+    m = GameManager(GameState())
+    m.set_current_roll([5, 4, 2, 4, 1], 2)
+    save_game(m.state, str(p))
+
+    loaded = load_game(str(p))
+    assert loaded.current_dice == [5, 4, 2, 4, 1]
+    assert loaded.roll_number == 2
+
+
+def test_undo_restores_current_visible_dice_order():
+    m = GameManager(GameState())
+    m.set_current_roll([5, 4, 2, 4, 1], 3)
+    m.apply_score(Category.CHANCE)
+
+    assert m.undo()
+    assert m.state.current_dice == [5, 4, 2, 4, 1]
+    assert m.state.roll_number == 3

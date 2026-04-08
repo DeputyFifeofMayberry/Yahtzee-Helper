@@ -108,22 +108,22 @@ def test_commit_writes_parsed_dice_and_roll_number_to_manager_state():
 
     commit_turn_draft_to_manager(session_state, manager)
 
-    assert manager.state.current_dice == [2, 3, 4, 5, 6]
+    assert manager.state.current_dice == [6, 2, 3, 4, 5]
     assert manager.state.roll_number == 3
 
 
-def test_quick_mode_commit_canonicalizes_through_manager():
+def test_quick_mode_commit_preserves_user_entered_die_order():
     manager = GameManager(GameState(current_dice=[1, 1, 1, 1, 1], roll_number=1))
     session_state = {
         TURN_ENTRY_MODE_KEY: ENTRY_MODE_QUICK,
-        TURN_QUICK_ENTRY_KEY: "65124",
+        TURN_QUICK_ENTRY_KEY: "54241",
         TURN_ROLL_KEY: 2,
         **{key: 0 for key in TURN_FACE_COUNT_KEYS},
     }
 
     commit_turn_draft_to_manager(session_state, manager)
 
-    assert manager.state.current_dice == [1, 2, 4, 5, 6]
+    assert manager.state.current_dice == [5, 4, 2, 4, 1]
     assert manager.state.roll_number == 2
 
 
@@ -145,3 +145,8 @@ def test_face_count_mode_commit_works_correctly():
 
     assert manager.state.current_dice == [1, 1, 1, 6, 6]
     assert manager.state.roll_number == 3
+
+
+def test_build_hold_mask_maps_held_duplicates_to_visible_order():
+    mask = build_hold_mask_for_current_dice([5, 4, 2, 4, 1], (1, 4, 4))
+    assert mask == [False, True, False, True, True]

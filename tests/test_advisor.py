@@ -101,6 +101,18 @@ def test_probability_of_max_yahtzee_state_is_at_least_recommended_line():
     assert rec.max_yahtzee_probability >= rec.recommended_line_yahtzee_probability
 
 
+def test_advisor_recommendation_is_stable_for_unsorted_input():
+    advisor = YahtzeeAdvisor()
+    sc = Scorecard()
+    sorted_rec = advisor.recommend([1, 2, 4, 4, 5], 2, sc, objective=OptimizationObjective.BOARD_UTILITY)
+    unsorted_rec = advisor.recommend([5, 4, 2, 4, 1], 2, sc, objective=OptimizationObjective.BOARD_UTILITY)
+
+    assert unsorted_rec.best_action.action_type == sorted_rec.best_action.action_type
+    assert unsorted_rec.best_action.held_dice == sorted_rec.best_action.held_dice
+    assert unsorted_rec.best_stop_category == sorted_rec.best_stop_category
+    assert unsorted_rec.best_stop_score == sorted_rec.best_stop_score
+
+
 def test_board_utility_preserves_234_core_for_small_straight():
     advisor = YahtzeeAdvisor()
     sc = Scorecard()

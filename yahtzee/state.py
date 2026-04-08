@@ -4,7 +4,7 @@ from copy import deepcopy
 
 from yahtzee.models import Category, GameState, TurnRecord
 from yahtzee.scoring import apply_score_to_scorecard
-from yahtzee.utils import canonical_dice
+from yahtzee.utils import validate_dice
 
 
 class GameManager:
@@ -13,7 +13,10 @@ class GameManager:
         self._undo_stack: list[GameState] = []
 
     def set_current_roll(self, dice: list[int], roll_number: int) -> None:
-        self.state.current_dice = list(canonical_dice(dice))
+        # Preserve the user's visible die order in state. Advisory/scoring code
+        # canonicalizes locally wherever sorted tuple semantics are required.
+        validate_dice(dice)
+        self.state.current_dice = list(dice)
         if roll_number < 1 or roll_number > 3:
             raise ValueError("roll_number must be 1..3")
         self.state.roll_number = roll_number
