@@ -1,5 +1,5 @@
 from yahtzee.advisor import YahtzeeAdvisor
-from yahtzee.models import ActionType, Category, Scorecard
+from yahtzee.models import ActionType, Category, OptimizationObjective, Scorecard
 from yahtzee.rules import legal_categories_for_roll
 from yahtzee.state import GameManager
 
@@ -83,3 +83,19 @@ def test_roll3_recommendation_category_is_legal_in_joker_state():
     assert rec.best_action.action_type == ActionType.SCORE_NOW
     legal = legal_categories_for_roll((2, 2, 2, 2, 2), sc)
     assert rec.best_action.category in legal
+
+
+def test_choose_best_hold_matches_recommendation_for_exact_turn_ev():
+    advisor = YahtzeeAdvisor()
+    sc = Scorecard()
+    dice = [2, 2, 3, 3, 6]
+    rec = advisor.recommend(dice, 1, sc, objective=OptimizationObjective.EXACT_TURN_EV)
+    expected_hold = advisor.choose_best_hold(tuple(sorted(dice)), 2, sc.score_signature(), OptimizationObjective.EXACT_TURN_EV)
+    assert rec.best_action.held_dice == expected_hold
+
+
+def test_probability_of_max_yahtzee_state_is_at_least_recommended_line():
+    advisor = YahtzeeAdvisor()
+    sc = Scorecard()
+    rec = advisor.recommend([2, 2, 3, 3, 6], 1, sc, objective=OptimizationObjective.BOARD_UTILITY)
+    assert rec.max_yahtzee_probability >= rec.recommended_line_yahtzee_probability

@@ -48,6 +48,12 @@ class ActionType(str, Enum):
     SCORE_NOW = "SCORE_NOW"
 
 
+class OptimizationObjective(str, Enum):
+    BOARD_UTILITY = "BOARD_UTILITY"
+    EXACT_TURN_EV = "EXACT_TURN_EV"
+    MAXIMIZE_YAHTZEE_PROBABILITY = "MAXIMIZE_YAHTZEE_PROBABILITY"
+
+
 @dataclass
 class Scorecard:
     scores: dict[Category, int | None] = field(default_factory=lambda: {c: None for c in ALL_CATEGORIES})
@@ -197,6 +203,7 @@ class CandidateAction:
     board_adjustment: float = 0.0
     description: str = ""
     probabilities: dict[str, float] = field(default_factory=dict)
+    yahtzee_probability: float = 0.0
 
 
 @dataclass
@@ -206,3 +213,6 @@ class Recommendation:
     best_stop_category: Category
     best_stop_score: int
     explanation: str
+    objective: OptimizationObjective
+    recommended_line_yahtzee_probability: float
+    max_yahtzee_probability: float
