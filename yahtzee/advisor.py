@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from functools import lru_cache
 
 from yahtzee.models import (
@@ -12,6 +13,7 @@ from yahtzee.models import (
     UPPER_CATEGORIES,
 )
 from yahtzee.probabilities import is_yahtzee_dice, outcome_class_distribution, reroll_distribution
+from yahtzee.rules import is_full_house, is_large_straight, is_n_of_a_kind, is_small_straight
 from yahtzee.scoring import score_roll_in_category
 from yahtzee.utils import canonical_dice, distinct_holds
 
@@ -31,6 +33,26 @@ CATEGORY_BASELINE = {
     Category.YAHTZEE: 0.8,
     Category.CHANCE: 22.0,
 }
+
+UPPER_PIP = {
+    Category.ONES: 1,
+    Category.TWOS: 2,
+    Category.THREES: 3,
+    Category.FOURS: 4,
+    Category.FIVES: 5,
+    Category.SIXES: 6,
+}
+
+
+@dataclass
+class UtilityBreakdown:
+    upper_bonus_progress: float = 0.0
+    category_scarcity: float = 0.0
+    sacrifice_slot: float = 0.0
+
+    @property
+    def total(self) -> float:
+        return self.upper_bonus_progress + self.category_scarcity + self.sacrifice_slot
 
 
 class YahtzeeAdvisor:
@@ -65,13 +87,18 @@ class YahtzeeAdvisor:
                 )
 
         score_now_yahtzee_probability = 1.0 if is_yahtzee_dice(cdice) else 0.0
+        score_now_adjustment = (
+            self.full_house_take_break_adjustment(cdice, roll_number, scorecard, best_stop_category)
+            if objective == OptimizationObjective.BOARD_UTILITY
+            else 0.0
+        )
         candidates.append(
             CandidateAction(
                 action_type=ActionType.SCORE_NOW,
                 category=best_stop_category,
-                expected_value=best_stop_utility,
+                expected_value=best_stop_utility + score_now_adjustment,
                 exact_turn_ev=float(best_stop_score),
-                board_adjustment=best_stop_utility - float(best_stop_score),
+                board_adjustment=(best_stop_utility - float(best_stop_score)) + score_now_adjustment,
                 description=f"Score {best_stop_category.value} now for {best_stop_score}.",
                 yahtzee_probability=score_now_yahtzee_probability,
             )
@@ -79,7 +106,7 @@ class YahtzeeAdvisor:
 
         ranked = sorted(candidates, key=lambda c: self._candidate_sort_key(c, objective), reverse=True)
         best = ranked[0]
-        explanation = self._explain(best, best_stop_category, roll_number, objective)
+        explanation = self._explain(best, best_stop_category, roll_number, objective, cdice, scorecard)
         return Recommendation(
             best_action=best,
             top_actions=ranked[:3],
@@ -153,7 +180,18 @@ class YahtzeeAdvisor:
             utility_ev += probability * next_utility
             yahtzee_probability_ev += probability * next_yahtzee_probability
 
+        if objective == OptimizationObjective.BOARD_UTILITY:
+            utility_ev += self._board_hold_adjustment(held, rolls_remaining, scorecard)
+
         return exact_ev, utility_ev, yahtzee_probability_ev
+
+    def _board_hold_adjustment(self, held: tuple[int, ...], rolls_remaining: int, scorecard: Scorecard) -> float:
+        if not held:
+            return 0.0
+        return (
+            self.straight_draw_adjustment(held, rolls_remaining, scorecard)
+            + self.yahtzee_chase_adjustment(held, rolls_remaining, scorecard)
+        )
 
     def choose_best_hold(
         self,
@@ -288,49 +326,220 @@ class YahtzeeAdvisor:
 
     def _score_utility(self, scorecard: Scorecard, category: Category, raw_score: int, yahtzee_bonus: int) -> float:
         utility = float(raw_score + yahtzee_bonus)
-
-        if category in UPPER_CATEGORIES:
-            pip = UPPER_CATEGORIES.index(category) + 1
-            target = 3 * pip
-            utility += 0.7 * min(raw_score, target)
-            if raw_score < target:
-                utility -= 0.3 * (target - raw_score)
-
-        open_count = len(scorecard.open_categories())
-        phase_factor = max(0.0, (open_count - 2) / 11)
-        baseline_gap = max(0.0, CATEGORY_BASELINE[category] - raw_score)
-        utility -= phase_factor * baseline_gap
-
-        if category == Category.YAHTZEE and raw_score == 0:
-            utility += 1.0 if open_count <= 5 else -1.0
-
-        if category == Category.THREE_KIND and open_count >= 9 and raw_score < 24:
-            utility -= 2.0
-
-        if category == Category.FOUR_KIND and open_count >= 9 and raw_score < 24:
-            utility -= 1.0
-
-        if category == Category.CHANCE and open_count >= 8 and raw_score < 23:
-            utility -= 5.0
-
+        breakdown = UtilityBreakdown(
+            upper_bonus_progress=self.upper_bonus_progress_adjustment(scorecard, category, raw_score),
+            category_scarcity=self.category_scarcity_adjustment(scorecard, category, raw_score),
+            sacrifice_slot=self.sacrifice_slot_adjustment(scorecard, category, raw_score),
+        )
+        utility += breakdown.total
         return utility
 
-    def _explain(self, best: CandidateAction, stop_cat: Category, roll_number: int, objective: OptimizationObjective) -> str:
+    def upper_bonus_progress_adjustment(self, scorecard: Scorecard, category: Category, raw_score: int) -> float:
+        if category not in UPPER_CATEGORIES:
+            return 0.0
+
+        current_upper = scorecard.upper_subtotal
+        needed_now = max(0, 63 - current_upper)
+        if needed_now == 0:
+            return 0.4
+
+        open_upper = scorecard.open_upper_categories()
+        if not open_upper:
+            return 0.0
+
+        pip = UPPER_PIP[category]
+        open_upper_capacity = sum(5 * UPPER_PIP[c] for c in open_upper)
+        remaining_capacity_after = max(0, open_upper_capacity - (5 * pip))
+        needed_after = max(0, needed_now - raw_score)
+
+        # bonus race pressure: large when there is little slack left.
+        pressure = needed_now / max(1.0, open_upper_capacity)
+        pressure_factor = 1.0 + (1.8 * min(1.0, pressure))
+
+        progress_ratio = min(1.0, raw_score / max(1.0, needed_now))
+        pip_weight = 0.5 + (pip / 6.0)
+        progress_value = 5.2 * progress_ratio * pip_weight * pressure_factor
+
+        if needed_after == 0:
+            progress_value += 7.0
+        elif needed_after > remaining_capacity_after:
+            progress_value += 3.0
+
+        if needed_now > open_upper_capacity * 0.92:
+            progress_value *= 0.3
+
+        target = 3 * pip
+        if raw_score >= target:
+            progress_value += 1.2
+        else:
+            progress_value -= 0.25 * (target - raw_score)
+
+        return progress_value
+
+    def category_scarcity_adjustment(self, scorecard: Scorecard, category: Category, raw_score: int) -> float:
+        open_count = len(scorecard.open_categories())
+        scarcity = {
+            Category.LARGE_STRAIGHT: 7.5,
+            Category.SMALL_STRAIGHT: 3.2,
+            Category.FULL_HOUSE: 2.8,
+            Category.YAHTZEE: 2.0,
+            Category.FOUR_KIND: 1.2,
+        }.get(category, 0.0)
+        if scarcity == 0.0:
+            return 0.0
+
+        phase = 0.7 + 0.6 * (open_count / 13.0)
+        score_factor = 1.0
+        if category == Category.LARGE_STRAIGHT and raw_score == 40:
+            score_factor = 1.25
+        elif category == Category.SMALL_STRAIGHT and raw_score == 30:
+            score_factor = 1.1
+
+        return scarcity * phase * score_factor
+
+    def sacrifice_slot_adjustment(self, scorecard: Scorecard, category: Category, raw_score: int) -> float:
+        open_count = len(scorecard.open_categories())
+        early = open_count >= 8
+
+        if raw_score > 0:
+            if category == Category.CHANCE and early and raw_score < 20:
+                return -2.8
+            return 0.0
+
+        if category == Category.CHANCE:
+            return -9.0 if early else -4.0
+        if category in (Category.ONES, Category.TWOS):
+            return -0.8 if early else -0.3
+        if category == Category.FOUR_KIND:
+            return -1.2 if early else -0.5
+        if category == Category.YAHTZEE:
+            return -3.5 if early else 0.5
+        return -1.8 if early else -0.8
+
+    def straight_draw_adjustment(self, held: tuple[int, ...], rolls_remaining: int, scorecard: Scorecard) -> float:
+        unique = set(held)
+        score = 0.0
+
+        large_open = not scorecard.is_filled(Category.LARGE_STRAIGHT)
+        small_open = not scorecard.is_filled(Category.SMALL_STRAIGHT)
+
+        four_card_runs = ({1, 2, 3, 4}, {2, 3, 4, 5}, {3, 4, 5, 6})
+        core_runs = ({2, 3, 4}, {3, 4, 5})
+
+        if large_open and any(run.issubset(unique) for run in four_card_runs):
+            score += 6.0 if rolls_remaining >= 2 else 3.5
+        if small_open and any(run.issubset(unique) for run in core_runs):
+            score += 4.8 if rolls_remaining >= 2 else 2.4
+
+        if large_open and len(held) == 5 and is_large_straight(held):
+            score += 9.0
+        if small_open and len(held) == 5 and is_small_straight(held):
+            score += 4.0
+
+        if (not large_open) and (not small_open):
+            score *= 0.1
+
+        return score
+
+    def full_house_take_break_adjustment(
+        self,
+        dice: tuple[int, ...],
+        roll_number: int,
+        scorecard: Scorecard,
+        chosen_category: Category,
+    ) -> float:
+        if roll_number >= 3 or not is_full_house(dice) or scorecard.is_filled(Category.FULL_HOUSE):
+            return 0.0
+
+        counts = sorted({d: dice.count(d) for d in set(dice)}.values())
+        if counts != [2, 3]:
+            return 0.0
+
+        triple_pip = max(set(dice), key=lambda p: dice.count(p))
+        open_count = len(scorecard.open_categories())
+        stability_need = 1.0 if open_count <= 4 else 0.0
+        upside_open = sum(
+            int(not scorecard.is_filled(cat))
+            for cat in (Category.THREE_KIND, Category.FOUR_KIND, Category.YAHTZEE)
+        )
+        upper_cat = UPPER_CATEGORIES[triple_pip - 1]
+        upper_open = not scorecard.is_filled(upper_cat)
+
+        if chosen_category == Category.FULL_HOUSE:
+            if triple_pip <= 3:
+                return 4.2 + stability_need
+            return -0.8 * upside_open - (1.0 if upper_open else 0.0)
+
+        # If not taking full house now, still lightly reward breaking high triple houses.
+        if triple_pip >= 5 and upside_open >= 2:
+            return 1.8
+        return 0.0
+
+    def yahtzee_chase_adjustment(self, held: tuple[int, ...], rolls_remaining: int, scorecard: Scorecard) -> float:
+        if rolls_remaining < 2 or len(held) != 4:
+            return 0.0
+
+        pip = held[0]
+        if any(d != pip for d in held):
+            return 0.0
+
+        yahtzee_score = scorecard.scores[Category.YAHTZEE]
+        if yahtzee_score is None:
+            base = 4.8
+        elif yahtzee_score == 50:
+            base = 6.0
+        elif yahtzee_score == 0:
+            base = 1.0
+        else:
+            base = 2.0
+
+        upper_category = UPPER_CATEGORIES[pip - 1]
+        if not scorecard.is_filled(upper_category):
+            needed = max(0, 63 - scorecard.upper_subtotal)
+            if needed > 0:
+                base += 1.2 * (pip / 6.0)
+
+        return base
+
+    def _explain(self, best: CandidateAction, stop_cat: Category, roll_number: int, objective: OptimizationObjective, dice: tuple[int, ...], scorecard: Scorecard) -> str:
         objective_label = {
             OptimizationObjective.BOARD_UTILITY: "board-aware utility",
             OptimizationObjective.EXACT_TURN_EV: "exact turn EV",
             OptimizationObjective.MAXIMIZE_YAHTZEE_PROBABILITY: "Yahtzee probability",
         }[objective]
 
+        strategic_reasons: list[str] = []
+        if objective == OptimizationObjective.BOARD_UTILITY:
+            if best.action_type == ActionType.HOLD_AND_REROLL and best.held_dice is not None:
+                if self.straight_draw_adjustment(best.held_dice, max(0, 3 - roll_number), scorecard) >= 4.5:
+                    strategic_reasons.append("preserving straight potential")
+                if self.yahtzee_chase_adjustment(best.held_dice, max(0, 3 - roll_number), scorecard) > 3.5:
+                    strategic_reasons.append("chasing Yahtzee from an opening four-of-a-kind")
+            if best.action_type == ActionType.SCORE_NOW and best.category in UPPER_CATEGORIES:
+                if self.upper_bonus_progress_adjustment(scorecard, best.category, int(best.exact_turn_ev)) > 4.0:
+                    strategic_reasons.append("chasing upper-bonus progress")
+            if best.action_type == ActionType.SCORE_NOW and best.category == Category.FULL_HOUSE:
+                if self.full_house_take_break_adjustment(dice, roll_number, scorecard, best.category) > 0:
+                    strategic_reasons.append("taking a secure Full House now")
+            if best.action_type == ActionType.SCORE_NOW and best.category == Category.CHANCE:
+                if self.sacrifice_slot_adjustment(scorecard, Category.CHANCE, int(best.exact_turn_ev)) >= 0:
+                    strategic_reasons.append("using Chance only because bailout flexibility is less valuable now")
+
+        reason_text = ""
+        if strategic_reasons:
+            reason_text = " Strategic factors: " + ", ".join(strategic_reasons) + "."
+
         if best.action_type == ActionType.SCORE_NOW:
             return (
                 f"Roll {roll_number}: scoring now is best for objective '{objective_label}'. "
                 f"Score-now EV is {best.exact_turn_ev:.2f}, board adjustment {best.board_adjustment:+.2f}, "
                 f"and Yahtzee chance on this line is {best.yahtzee_probability:.1%}."
+                f"{reason_text}"
             )
         return (
             f"Roll {roll_number}: this hold is best for objective '{objective_label}'. "
             f"Projected exact turn EV is {best.exact_turn_ev:.2f}, board-adjusted utility is {best.expected_value:.2f}, "
             f"and Yahtzee chance on this line is {best.yahtzee_probability:.1%}. "
             f"If you stop immediately, {stop_cat.value} is the best legal score-now category."
+            f"{reason_text}"
         )
