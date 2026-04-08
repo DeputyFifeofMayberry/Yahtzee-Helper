@@ -99,3 +99,80 @@ def test_probability_of_max_yahtzee_state_is_at_least_recommended_line():
     sc = Scorecard()
     rec = advisor.recommend([2, 2, 3, 3, 6], 1, sc, objective=OptimizationObjective.BOARD_UTILITY)
     assert rec.max_yahtzee_probability >= rec.recommended_line_yahtzee_probability
+
+
+def test_board_utility_preserves_234_core_for_small_straight():
+    advisor = YahtzeeAdvisor()
+    sc = Scorecard()
+    rec = advisor.recommend([2, 3, 4, 6, 6], 1, sc, objective=OptimizationObjective.BOARD_UTILITY)
+    assert rec.best_action.action_type == ActionType.HOLD_AND_REROLL
+    assert rec.best_action.held_dice is not None
+    assert {2, 3, 4}.issubset(set(rec.best_action.held_dice))
+
+
+def test_board_utility_preserves_345_core_for_small_straight():
+    advisor = YahtzeeAdvisor()
+    sc = Scorecard()
+    rec = advisor.recommend([3, 4, 5, 1, 1], 1, sc, objective=OptimizationObjective.BOARD_UTILITY)
+    assert rec.best_action.action_type == ActionType.HOLD_AND_REROLL
+    assert rec.best_action.held_dice is not None
+    assert {3, 4, 5}.issubset(set(rec.best_action.held_dice))
+
+
+def test_board_utility_treats_made_large_straight_as_premium():
+    advisor = YahtzeeAdvisor()
+    sc = Scorecard()
+    rec = advisor.recommend([2, 3, 4, 5, 6], 1, sc, objective=OptimizationObjective.BOARD_UTILITY)
+    if rec.best_action.action_type == ActionType.SCORE_NOW:
+        assert rec.best_action.category == Category.LARGE_STRAIGHT
+    else:
+        assert rec.best_action.action_type == ActionType.HOLD_AND_REROLL
+        assert rec.best_action.held_dice == (2, 3, 4, 5, 6)
+
+
+def test_board_utility_preserves_four_card_large_straight_draw():
+    advisor = YahtzeeAdvisor()
+    sc = Scorecard()
+    rec = advisor.recommend([1, 2, 3, 4, 6], 1, sc, objective=OptimizationObjective.BOARD_UTILITY)
+    assert rec.best_action.action_type == ActionType.HOLD_AND_REROLL
+    assert rec.best_action.held_dice is not None
+    assert {1, 2, 3, 4}.issubset(set(rec.best_action.held_dice))
+
+
+def test_board_utility_low_full_house_leans_take_now():
+    advisor = YahtzeeAdvisor()
+    sc = Scorecard()
+    rec = advisor.recommend([2, 2, 3, 3, 3], 1, sc, objective=OptimizationObjective.BOARD_UTILITY)
+    assert rec.best_action.action_type == ActionType.SCORE_NOW
+    assert rec.best_action.category == Category.FULL_HOUSE
+
+
+def test_board_utility_high_full_house_can_break_for_upside():
+    advisor = YahtzeeAdvisor()
+    sc = Scorecard()
+    rec = advisor.recommend([5, 5, 6, 6, 6], 1, sc, objective=OptimizationObjective.BOARD_UTILITY)
+    assert rec.best_action.action_type == ActionType.HOLD_AND_REROLL
+
+
+def test_board_utility_opening_four_of_a_kind_chases_yahtzee_with_fours():
+    advisor = YahtzeeAdvisor()
+    sc = Scorecard()
+    rec = advisor.recommend([4, 4, 4, 4, 1], 1, sc, objective=OptimizationObjective.BOARD_UTILITY)
+    assert rec.best_action.action_type == ActionType.HOLD_AND_REROLL
+    assert rec.best_action.held_dice == (4, 4, 4, 4)
+
+
+def test_board_utility_opening_four_of_a_kind_chases_yahtzee_with_sixes_too():
+    advisor = YahtzeeAdvisor()
+    sc = Scorecard()
+    rec = advisor.recommend([6, 6, 6, 6, 1], 1, sc, objective=OptimizationObjective.BOARD_UTILITY)
+    assert rec.best_action.action_type == ActionType.HOLD_AND_REROLL
+    assert rec.best_action.held_dice == (6, 6, 6, 6)
+
+
+def test_board_utility_does_not_blindly_burn_chance_early_on_poor_roll():
+    advisor = YahtzeeAdvisor()
+    sc = Scorecard()
+    rec = advisor.recommend([1, 1, 2, 2, 3], 3, sc, objective=OptimizationObjective.BOARD_UTILITY)
+    assert rec.best_action.action_type == ActionType.SCORE_NOW
+    assert rec.best_action.category != Category.CHANCE

@@ -53,7 +53,16 @@ The same objective is used consistently at top-level recommendation, recursive c
 ### Heuristic / model-based
 
 - **Only** the board-aware utility objective applies heuristic shaping.
-- That objective is intentionally scorecard-aware and practical, but it is not a full-game optimal dynamic program over all 13 future turns.
+- `BOARD_UTILITY` is now an interpretable blend of exact turn EV plus board-state adjustments for:
+  - upper-bonus race progress (dynamic by subtotal, need-to-63, and open upper boxes),
+  - scarce-category value (especially made straights),
+  - straight-core and straight-draw preservation on early rolls,
+  - full-house take-vs-break context (low FHs are more often banked; high FHs can be broken),
+  - opening four-of-a-kind Yahtzee chase pressure,
+  - dynamic sacrifice-slot pressure (e.g., Chance preserved as a bailout box early more often).
+- `EXACT_TURN_EV` remains mathematically aligned to pure expected points this turn.
+- `MAXIMIZE_YAHTZEE_PROBABILITY` remains mathematically aligned to pure Yahtzee probability.
+- The board-aware objective is intentionally practical, but it is not a full-game optimal dynamic program over all 13 future turns.
 
 ## Yahtzee probability semantics
 
@@ -66,6 +75,13 @@ The displayed Yahtzee percentages have two different meanings:
   Best achievable Yahtzee chance from this same state if you optimize specifically for Yahtzee probability.
 
 These can differ intentionally. For example, board-aware utility may prefer a hold with slightly lower Yahtzee chance but better expected scoring utility.
+
+Additional board-aware examples now modeled:
+- Preserve **2-3-4** or **3-4-5** cores early when Small Straight is still open.
+- Preserve **1-2-3-4 / 2-3-4-5 / 3-4-5-6** on early rolls when Large Straight is still open.
+- Treat made Large Straights as premium scarce outcomes when the category is open.
+- Take low full houses (e.g., 2-2-3-3-3) more readily than high full houses (e.g., 5-5-6-6-6), which are sometimes broken for upside.
+- Preserve Chance as a flexible bailout box more often early game instead of dumping it by default.
 
 ### Concrete example
 
