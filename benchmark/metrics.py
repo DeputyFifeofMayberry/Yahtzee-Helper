@@ -4,7 +4,7 @@ import math
 from collections import defaultdict
 from statistics import mean, median
 
-from benchmark.models import GameSimulationResult, OracleComparisonRecord
+from .models import GameSimulationResult, OracleComparisonRecord
 
 
 def percentile(values: list[float], pct: float) -> float:

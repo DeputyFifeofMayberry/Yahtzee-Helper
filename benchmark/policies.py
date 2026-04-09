@@ -4,7 +4,7 @@ from collections import Counter
 from dataclasses import dataclass
 from typing import Protocol
 
-from benchmark.models import PolicyDecision
+from .models import PolicyDecision
 from yahtzee.advisor import YahtzeeAdvisor
 from yahtzee.models import ActionType, Category, GameState, OptimizationObjective, Scorecard
 from yahtzee.rules import is_full_house, is_large_straight, is_small_straight

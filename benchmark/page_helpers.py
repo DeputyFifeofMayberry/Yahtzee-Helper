@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import asdict
 
-from benchmark.run import BenchmarkSettings, estimate_run_cost
+from .run import BenchmarkSettings, estimate_run_cost
 
 
 def settings_equal(a: BenchmarkSettings, b: BenchmarkSettings) -> bool:
