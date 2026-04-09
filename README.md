@@ -153,25 +153,41 @@ This prevents the previous first-click bounce-back/false-input issue caused by r
 
 ## Benchmarking (CLI + in-app page)
 
-You can benchmark the four policies either from the CLI or inside Streamlit.
+The repository includes a **Benchmark Analysis** workflow focused on fair and reproducible strategy comparison.
 
-### In-app benchmark dashboard
+### What the benchmark does
 
-Run the app:
+- **Full-game score comparison** uses common random numbers: all strategies are evaluated on the same game seed identities.
+- **Move-quality comparison** evaluates chosen actions against a Monte Carlo **rollout reference** on sampled snapshots.
+- Default snapshot corpus mode is **neutral_canonical** (strategy-neutral generation path).
+
+### What the rollout reference is (and is not)
+
+- It is a rollout-based Monte Carlo reference with explicit rollout counts.
+- It is useful for consistency checks, not mathematical ground truth.
+- Results are reported as **reference agreement** and **estimated regret vs reference**.
+
+### Reproducibility guarantees
+
+- Same benchmark seed -> same shared full-game seeds and sampled snapshots.
+- Rollout-reference seed derivation is stable across processes (canonical JSON + SHA-256).
+- Benchmark determinism does not rely on Python process-randomized `hash()`.
+
+### In-app benchmark page
+
+Run the app and open **Benchmark Analysis**:
 
 ```bash
 streamlit run app.py
 ```
 
-Then open **Benchmark Analysis** from the Streamlit page selector. This page is separate from gameplay and includes preset controls, progress updates, summaries, charts, and CSV/JSON downloads.
-
 ### CLI benchmark harness
 
 ```bash
-python scripts/run_benchmarks.py
+python scripts/run_benchmarks.py --mode balanced
 ```
 
-See `BENCHMARKS.md` for full benchmark metrics and options.
+See `BENCHMARKS.md` for all modes, settings, and output files.
 
 ## Install
 

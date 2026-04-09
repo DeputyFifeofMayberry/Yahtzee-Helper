@@ -23,10 +23,15 @@ class PolicyDecision:
 
 @dataclass(frozen=True)
 class DecisionStateSnapshot:
+    snapshot_id: str
     score_signature: tuple[tuple[int | None, ...], int]
     dice: tuple[int, ...]
     roll_number: int
     turn_index: int
+    provenance_source: str
+    provenance_seed: int
+    provenance_game_id: int
+    provenance_policy: str
     tags: tuple[str, ...] = ()
 
 
@@ -34,6 +39,8 @@ class DecisionStateSnapshot:
 class GameSimulationResult:
     policy_name: str
     seed: int
+    game_id: int
+    shared_seed_id: int
     final_score: int
     upper_bonus_hit: bool
     upper_subtotal: int
@@ -45,10 +52,22 @@ class GameSimulationResult:
 
 
 @dataclass(frozen=True)
-class OracleComparisonRecord:
+class RolloutReferenceComparisonRecord:
     policy_name: str
-    matched_oracle: bool
-    regret: float
+    snapshot_id: str
+    provenance_source: str
+    provenance_seed: int
+    provenance_game_id: int
+    provenance_policy: str
+    dice: tuple[int, ...]
     turn_index: int
     roll_number: int
+    score_signature: str
+    policy_action: str
+    reference_action: str
+    matched_rollout_reference: bool
+    estimated_policy_value: float
+    estimated_reference_value: float
+    estimated_regret_vs_reference: float
+    evaluation_rollouts: int
     tags: tuple[str, ...] = ()

@@ -21,7 +21,7 @@ def test_advanced_mode_can_include_exact_turn_ev():
 
 
 def test_plan_contains_runtime_metadata_fields():
-    settings = BenchmarkSettings(full_games=2, state_sample_games=0, state_sample_size=0, oracle_rollouts=0)
+    settings = BenchmarkSettings(full_games=2, state_sample_games=0, state_sample_size=0, rollout_reference_rollouts=0)
     plan = plan_benchmark_run(settings=settings, mode="balanced", include_move_quality=False)
     assert isinstance(plan.workload, dict)
     assert "full_game_simulations" in plan.workload

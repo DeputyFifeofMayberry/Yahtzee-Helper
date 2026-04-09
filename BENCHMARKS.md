@@ -1,97 +1,89 @@
-# Yahtzee strategy comparison benchmark harness
+# Benchmark Analysis (Yahtzee-Helper)
 
-This repository includes a headless benchmark engine for comparing four strategy styles:
+This project ships a **Benchmark Analysis** system for strategy comparison. It is designed for fairer, reproducible comparisons and auditable outputs.
 
-1. `board_utility`
-2. `exact_turn_ev`
-3. `human_heuristic`
-4. `rollout_oracle`
+## What it compares
 
-## Run depth modes (fast vs deep)
+1. **Full-game score comparison** (paired)
+   - Uses **common random numbers**: every strategy is run on the same per-game seed list.
+   - Outputs keep `game_id` and `shared_seed_id` so pairwise deltas are auditable.
+2. **Move-quality vs rollout reference**
+   - Uses sampled decision snapshots.
+   - Default corpus mode is `neutral_canonical` (strategy-neutral generation path).
+   - Compares each strategy action to a Monte Carlo **rollout reference** (not ground truth).
 
-The benchmark engine supports three depth profiles for browser and CLI use:
+## Canonical modes
 
-- **Fast Check (`mode=fast`)**
-  - Small full-game sample.
-  - Very small best-known-choice comparison sample.
-  - Designed for quick browser feedback.
-- **Standard Comparison (`mode=standard`)**
-  - Moderate full-game sample.
-  - Moderate best-known-choice comparison.
-  - Good default for day-to-day comparisons.
-- **Deep Analysis (`mode=deep`)**
-  - Large full-game sample.
-  - Larger best-known-choice comparison and rollout depth.
-  - Use when you need higher-confidence benchmarking.
+- `quick`
+- `balanced` (default)
+- `deep`
+- `advanced_custom`
 
-The rollout oracle remains intentionally expensive and should be used as a benchmark reference, not a default gameplay policy.
+Backward-compatible aliases:
+- `fast` -> `quick`
+- `standard` -> `balanced`
+- `custom` -> `advanced_custom`
 
-## What it measures
+## Reference terminology (honest naming)
 
-### How each strategy scored (full-game metrics)
-- Average Final Score
-- Median Final Score
-- Low-end / High-end Score Range (P10/P90)
-- Upper Bonus Hit Rate
-- Average Upper Subtotal
-- Yahtzee Rate
-- Extra Yahtzee Bonus Rate
-- Average Zeros per Game
-- How Often This Box Ended Up as 0
-- Average Score by Category
+Use these terms in UI/CLI/docs/outputs:
+- `rollout_reference`
+- `reference agreement rate`
+- `estimated regret vs reference`
 
-### How often each strategy matched the best known choice
-For sampled in-game decision states, each strategy is compared to the rollout oracle reference.
+The rollout reference is an approximate Monte Carlo evaluator. It is not an exact oracle.
 
-- Matched Best-Known Choice (oracle agreement rate)
-- Average Points Lost vs Best-Known Choice (regret)
-- Median / high-end regret
-- Severe misses (>3 and >5 points)
-- Breakdowns by roll number and state type tags
+## Reproducibility
 
-## In-app page
+- Full-game stage: deterministic shared seed bank from `seed`.
+- Move-quality stage: deterministic snapshot sampling from fixed RNG seeded by `seed`.
+- Rollout reference seed derivation from game state uses stable canonical JSON + SHA-256.
+- No Python `hash()` is used for benchmark determinism.
 
-Run Streamlit and open **Strategy Test Lab** from the sidebar:
+## CLI examples
+
+Balanced run:
 
 ```bash
-streamlit run app.py
+python scripts/run_benchmarks.py --mode balanced
 ```
 
-The page is optimized for normal browser users first:
-- plain-English labels and help text
-- Fast / Standard / Deep presets that autofill but stay editable
-- advanced settings hidden behind an expander
-- run-cost estimate and heavy-run warnings
-- detailed data and downloads still available
-
-## CLI workflow
-
-Run with mode defaults:
+Deep run with explicit move-quality stage:
 
 ```bash
-python scripts/run_benchmarks.py --mode standard
+python scripts/run_benchmarks.py --mode deep --include-move-quality
 ```
 
-Run deep analysis:
+Advanced custom run:
 
 ```bash
-python scripts/run_benchmarks.py --mode deep
+python scripts/run_benchmarks.py --mode advanced_custom --full-games 120 --state-sample-games 20 --state-sample-size 80 --rollout-reference-rollouts 24 --corpus-mode neutral_canonical
 ```
 
-Override specific values while keeping mode defaults:
+## Output files
 
-```bash
-python scripts/run_benchmarks.py --mode standard --full-games 120 --state-sample-size 70
-```
-
-Use fully custom settings:
-
-```bash
-python scripts/run_benchmarks.py --mode custom --full-games 250 --oracle-games 40 --state-sample-games 80 --state-sample-size 120 --state-sample-rate 0.35 --oracle-rollouts 40
-```
-
-Outputs are written to `benchmark_results/` by default:
 - `full_game_results.csv`
-- `oracle_comparisons.csv`
+- `rollout_reference_comparisons.csv`
 - `full_game_summary.json`
-- `oracle_summary.json`
+- `rollout_reference_summary.json`
+- `run_manifest.json`
+- `run_result.json`
+
+### Audit fields in rollout rows
+
+Each row includes: snapshot id, provenance, dice, roll number, turn index, score signature, policy action, reference action, match flag, estimated policy/reference values, estimated regret, rollout count, and tags.
+
+## Browser-safe behavior
+
+Non-advanced modes apply browser-safe caps. If caps are applied:
+- the run records auto-adjustments
+- `run_manifest.json` records requested vs effective settings
+- UI displays explicit downgrade notices
+
+## Serious-comparison guidance
+
+For more stable comparison:
+- use `balanced` or `deep`
+- keep `corpus_mode=neutral_canonical`
+- use enough full games and sampled states
+- interpret move-quality metrics with caution text and sample counts

@@ -3,7 +3,7 @@ from __future__ import annotations
 import random
 from collections import Counter
 from copy import deepcopy
-from typing import Callable
+from typing import Callable, Literal
 
 from .models import DecisionStateSnapshot, GameSimulationResult, PolicyDecision
 from .policies import Policy
@@ -11,6 +11,8 @@ from yahtzee.advisor import YahtzeeAdvisor
 from yahtzee.models import Category, GameState, Scorecard
 from yahtzee.rules import is_full_house, is_large_straight, is_n_of_a_kind, is_small_straight, is_yahtzee
 from yahtzee.state import GameManager
+
+CorpusMode = Literal["neutral_canonical", "on_policy"]
 
 
 def roll_five_dice(rng: random.Random) -> list[int]:
@@ -68,18 +70,32 @@ def classify_state(state: GameState) -> tuple[str, ...]:
 
     return tuple(tags)
 
+
 def _is_bailout_state(dice: tuple[int, ...], scorecard: Scorecard) -> bool:
     if is_full_house(dice) or is_small_straight(dice) or is_large_straight(dice) or is_n_of_a_kind(dice, 3):
         return False
     return sum(dice) <= 18 and Category.CHANCE in scorecard.open_categories()
 
 
-def snapshot_state(state: GameState) -> DecisionStateSnapshot:
+def snapshot_state(
+    state: GameState,
+    *,
+    snapshot_id: str,
+    provenance_source: str,
+    provenance_seed: int,
+    provenance_game_id: int,
+    provenance_policy: str,
+) -> DecisionStateSnapshot:
     return DecisionStateSnapshot(
+        snapshot_id=snapshot_id,
         score_signature=state.scorecard.score_signature(),
         dice=tuple(state.current_dice),
         roll_number=state.roll_number,
         turn_index=state.turn_index,
+        provenance_source=provenance_source,
+        provenance_seed=provenance_seed,
+        provenance_game_id=provenance_game_id,
+        provenance_policy=provenance_policy,
         tags=classify_state(state),
     )
 
@@ -111,16 +127,30 @@ def simulate_full_game(
     seed: int,
     advisor: YahtzeeAdvisor | None = None,
     state_sample_rate: float = 0.0,
+    game_id: int = -1,
+    shared_seed_id: int = -1,
+    provenance_source: str = "full_game_run",
 ) -> GameSimulationResult:
     rng = random.Random(seed)
     advisor = advisor or YahtzeeAdvisor()
     manager = GameManager(GameState())
     sampled_states: list[DecisionStateSnapshot] = []
+    sample_counter = 0
 
     while manager.state.turn_index <= 13:
         ensure_active_roll(manager, rng)
         if state_sample_rate > 0.0 and rng.random() < state_sample_rate:
-            sampled_states.append(snapshot_state(manager.state))
+            sample_counter += 1
+            sampled_states.append(
+                snapshot_state(
+                    manager.state,
+                    snapshot_id=f"{provenance_source}|{policy.name}|g{game_id}|s{sample_counter}",
+                    provenance_source=provenance_source,
+                    provenance_seed=seed,
+                    provenance_game_id=game_id,
+                    provenance_policy=policy.name,
+                )
+            )
         decision = policy.decide(clone_state(manager.state), advisor)
         if decision.is_score:
             if decision.category is None:
@@ -135,12 +165,12 @@ def simulate_full_game(
             manager.set_current_roll(next_dice, manager.state.roll_number + 1)
 
     final = manager.state.scorecard
-    zeroed_categories = tuple(
-        category.value for category, score in final.scores.items() if score == 0
-    )
+    zeroed_categories = tuple(category.value for category, score in final.scores.items() if score == 0)
     return GameSimulationResult(
         policy_name=policy.name,
         seed=seed,
+        game_id=game_id,
+        shared_seed_id=shared_seed_id,
         final_score=final.grand_total,
         upper_bonus_hit=final.upper_bonus > 0,
         upper_subtotal=final.upper_subtotal,
@@ -153,7 +183,10 @@ def simulate_full_game(
 
 
 def sample_state_corpus(
+    *,
+    corpus_mode: CorpusMode,
     policies: list[Policy],
+    canonical_policy: Policy,
     games_per_policy: int,
     seed: int,
     advisor: YahtzeeAdvisor | None = None,
@@ -162,9 +195,29 @@ def sample_state_corpus(
 ) -> list[DecisionStateSnapshot]:
     advisor = advisor or YahtzeeAdvisor()
     corpus: list[DecisionStateSnapshot] = []
-    total_games = len(policies) * max(0, games_per_policy)
+
+    if corpus_mode == "neutral_canonical":
+        total_games = max(0, games_per_policy)
+        for game_idx in range(total_games):
+            game_seed = seed + game_idx
+            result = simulate_full_game(
+                canonical_policy,
+                seed=game_seed,
+                advisor=advisor,
+                state_sample_rate=state_sample_rate,
+                game_id=game_idx,
+                shared_seed_id=game_idx,
+                provenance_source="neutral_canonical",
+            )
+            corpus.extend(result.sampled_states)
+            if on_progress is not None:
+                on_progress(game_idx + 1, total_games)
+        return corpus
+
+    sorted_policies = sorted(policies, key=lambda p: p.name)
+    total_games = len(sorted_policies) * max(0, games_per_policy)
     done = 0
-    for offset, policy in enumerate(policies):
+    for offset, policy in enumerate(sorted_policies):
         for game_idx in range(games_per_policy):
             game_seed = seed + (offset * 1_000_000) + game_idx
             result = simulate_full_game(
@@ -172,6 +225,9 @@ def sample_state_corpus(
                 seed=game_seed,
                 advisor=advisor,
                 state_sample_rate=state_sample_rate,
+                game_id=game_idx,
+                shared_seed_id=game_idx,
+                provenance_source="on_policy",
             )
             corpus.extend(result.sampled_states)
             done += 1

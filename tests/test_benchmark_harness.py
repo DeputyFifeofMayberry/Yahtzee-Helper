@@ -1,8 +1,8 @@
 from random import Random
 
-from benchmark.metrics import summarize_game_results, summarize_oracle_results
+from benchmark.metrics import summarize_game_results, summarize_rollout_reference_results
 from benchmark.models import PolicyDecision
-from benchmark.page_helpers import STRATEGY_METADATA, flatten_full_summary, flatten_oracle_summary, strategy_display_name
+from benchmark.page_helpers import STRATEGY_METADATA, flatten_full_summary, flatten_rollout_reference_summary, strategy_display_name
 from benchmark.policies import HumanHeuristicPolicy, ObjectivePolicy
 from benchmark.simulator import apply_decision_once, classify_state
 from yahtzee.advisor import YahtzeeAdvisor
@@ -42,7 +42,7 @@ def test_classify_state_tags_common_patterns():
 def test_strategy_display_metadata_used_in_helpers():
     assert strategy_display_name("board_utility") == "Board-aware strategy"
     game_rows = flatten_full_summary({"board_utility": summarize_game_results([])})
-    oracle_rows = flatten_oracle_summary({"board_utility": summarize_oracle_results([])})
+    ref_rows = flatten_rollout_reference_summary({"board_utility": summarize_rollout_reference_results([])})
     assert game_rows[0]["Strategy"] == "Board-aware strategy"
-    assert oracle_rows[0]["Strategy"] == "Board-aware strategy"
-    assert set(STRATEGY_METADATA.keys()) >= {"board_utility", "exact_turn_ev", "human_heuristic", "rollout_oracle"}
+    assert ref_rows[0]["Strategy"] == "Board-aware strategy"
+    assert set(STRATEGY_METADATA.keys()) >= {"board_utility", "exact_turn_ev", "human_heuristic", "rollout_reference"}
