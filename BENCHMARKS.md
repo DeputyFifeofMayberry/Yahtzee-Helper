@@ -1,73 +1,93 @@
-# Yahtzee policy benchmark harness
+# Yahtzee strategy comparison benchmark harness
 
-This repository now includes a headless benchmark harness for comparing four policy styles:
+This repository includes a headless benchmark engine for comparing four strategy styles:
 
 1. `board_utility`
 2. `exact_turn_ev`
 3. `human_heuristic`
 4. `rollout_oracle`
 
+## Run depth modes (fast vs deep)
+
+The benchmark engine supports three depth profiles for browser and CLI use:
+
+- **Fast Check (`mode=fast`)**
+  - Small full-game sample.
+  - Very small best-known-choice comparison sample.
+  - Designed for quick browser feedback.
+- **Standard Comparison (`mode=standard`)**
+  - Moderate full-game sample.
+  - Moderate best-known-choice comparison.
+  - Good default for day-to-day comparisons.
+- **Deep Analysis (`mode=deep`)**
+  - Large full-game sample.
+  - Larger best-known-choice comparison and rollout depth.
+  - Use when you need higher-confidence benchmarking.
+
+The rollout oracle remains intentionally expensive and should be used as a benchmark reference, not a default gameplay policy.
+
 ## What it measures
 
-### Full-game metrics
-- average final score
-- median final score
-- p10 / p90 final score
-- upper bonus hit rate
-- average upper subtotal
-- Yahtzee rate
-- extra Yahtzee bonus rate
-- average zeros per game
-- zero rate by category
-- average score by category
+### How each strategy scored (full-game metrics)
+- Average Final Score
+- Median Final Score
+- Low-end / High-end Score Range (P10/P90)
+- Upper Bonus Hit Rate
+- Average Upper Subtotal
+- Yahtzee Rate
+- Extra Yahtzee Bonus Rate
+- Average Zeros per Game
+- How Often This Box Ended Up as 0
+- Average Score by Category
 
-### Oracle-comparison metrics
-The rollout oracle is used as the stronger reference policy.
+### How often each strategy matched the best known choice
+For sampled in-game decision states, each strategy is compared to the rollout oracle reference.
 
-For sampled in-game states, each policy is compared against the rollout oracle on:
-- oracle agreement rate
-- average regret
-- median regret
-- p90 regret
-- severe miss rate > 3 points
-- severe miss rate > 5 points
+- Matched Best-Known Choice (oracle agreement rate)
+- Average Points Lost vs Best-Known Choice (regret)
+- Median / high-end regret
+- Severe misses (>3 and >5 points)
+- Breakdowns by roll number and state type tags
 
-The comparison is also sliced by:
-- roll number
-- game phase
-- made full house
-- made straight
-- opening four of a kind
-- upper bonus pressure
-- bailout states
+## In-app page
 
-## In-app Benchmark Analysis page
-
-Benchmarks are also available inside Streamlit as a separate page:
+Run Streamlit and open **Strategy Test Lab** from the sidebar:
 
 ```bash
 streamlit run app.py
 ```
 
-Then open **Benchmark Analysis** from the Streamlit pages sidebar.
+The page is optimized for normal browser users first:
+- plain-English labels and help text
+- Fast / Standard / Deep presets that autofill but stay editable
+- advanced settings hidden behind an expander
+- run-cost estimate and heavy-run warnings
+- detailed data and downloads still available
 
-The in-app page uses the same benchmark backend (`benchmark/run.py`) as the CLI and supports:
-- Quick / Standard / Deep / Custom presets
-- browser-safe progress feedback
-- full-game and oracle summaries
-- sliced oracle views by roll and tag
-- CSV/JSON downloads generated in-memory
+## CLI workflow
 
-## How to run
+Run with mode defaults:
 
 ```bash
-python scripts/run_benchmarks.py
+python scripts/run_benchmarks.py --mode standard
 ```
 
-Useful options:
+Run deep analysis:
 
 ```bash
-python scripts/run_benchmarks.py --full-games 1000 --oracle-games 100 --state-sample-size 250 --oracle-rollouts 80
+python scripts/run_benchmarks.py --mode deep
+```
+
+Override specific values while keeping mode defaults:
+
+```bash
+python scripts/run_benchmarks.py --mode standard --full-games 120 --state-sample-size 70
+```
+
+Use fully custom settings:
+
+```bash
+python scripts/run_benchmarks.py --mode custom --full-games 250 --oracle-games 40 --state-sample-games 80 --state-sample-size 120 --state-sample-rate 0.35 --oracle-rollouts 40
 ```
 
 Outputs are written to `benchmark_results/` by default:
@@ -75,10 +95,3 @@ Outputs are written to `benchmark_results/` by default:
 - `oracle_comparisons.csv`
 - `full_game_summary.json`
 - `oracle_summary.json`
-
-## Notes
-
-- `BOARD_UTILITY` remains a heuristic policy.
-- `EXACT_TURN_EV` remains an exact single-turn EV objective.
-- `rollout_oracle` is intentionally expensive and should be treated as the benchmark reference, not the default gameplay policy.
-- The human heuristic policy is intentionally simpler than the board-aware advisor so you can tell whether the current strategy is actually outperforming common practical rules.

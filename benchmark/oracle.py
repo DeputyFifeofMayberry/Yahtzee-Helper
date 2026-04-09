@@ -12,6 +12,9 @@ from yahtzee.state import GameManager
 from yahtzee.utils import distinct_holds
 
 
+DecisionKey = tuple[str, tuple[int, ...], int, int, str, tuple[int, ...], str | None]
+
+
 def scorecard_from_snapshot(snapshot: DecisionStateSnapshot) -> Scorecard:
     return Scorecard.from_signature(snapshot.score_signature)
 
@@ -77,8 +80,13 @@ class RolloutOraclePolicy:
         decision: PolicyDecision,
         advisor: YahtzeeAdvisor,
         rollout_seeds: list[int],
+        decision_cache: dict[DecisionKey, float] | None = None,
     ) -> float:
         continuation = self.continuation_policy or ObjectivePolicyAdapter(OptimizationObjective.BOARD_UTILITY)
+        cache_key = _decision_cache_key(state, decision, rollout_seeds, continuation.name)
+        if decision_cache is not None and cache_key in decision_cache:
+            return decision_cache[cache_key]
+
         total = 0.0
         for seed in rollout_seeds:
             rng = random.Random(seed)
@@ -87,7 +95,11 @@ class RolloutOraclePolicy:
                 total += advanced_state.scorecard.grand_total
                 continue
             total += simulate_from_active_state(advanced_state, continuation, seed + 17, advisor)
-        return total / max(1, len(rollout_seeds))
+
+        value = total / max(1, len(rollout_seeds))
+        if decision_cache is not None:
+            decision_cache[cache_key] = value
+        return value
 
     def _evaluation_seeds(self, state: GameState, count: int) -> list[int]:
         base = self._seed_from_state(state)
@@ -154,22 +166,48 @@ def compare_policies_to_oracle(
     policies: list[Policy],
     oracle: RolloutOraclePolicy,
     advisor: YahtzeeAdvisor | None = None,
+    evaluation_rollouts: int | None = None,
 ) -> list[OracleComparisonRecord]:
     advisor = advisor or YahtzeeAdvisor()
     records: list[OracleComparisonRecord] = []
+    decision_cache: dict[DecisionKey, float] = {}
+    state_decision_cache: dict[tuple[str, tuple[int, ...], int, int], PolicyDecision] = {}
+
     for snapshot in snapshots:
         state = state_from_snapshot(snapshot)
-        oracle_decision = oracle.decide(clone_state(state), advisor)
-        evaluation_seeds = oracle._evaluation_seeds(state, max(8, oracle.rollouts_per_action // 3))
-        oracle_value = oracle._estimate_action_value(state, oracle_decision, advisor, evaluation_seeds)
+        state_key = (snapshot.score_signature, snapshot.dice, snapshot.roll_number, snapshot.turn_index)
+        oracle_decision = state_decision_cache.get(state_key)
+        if oracle_decision is None:
+            oracle_decision = oracle.decide(clone_state(state), advisor)
+            state_decision_cache[state_key] = oracle_decision
+
+        rollout_count = evaluation_rollouts if evaluation_rollouts is not None else max(8, oracle.rollouts_per_action // 3)
+        evaluation_seeds = oracle._evaluation_seeds(state, rollout_count)
+        oracle_value = oracle._estimate_action_value(
+            state,
+            oracle_decision,
+            advisor,
+            evaluation_seeds,
+            decision_cache=decision_cache,
+        )
 
         for policy in policies:
             decision = policy.decide(clone_state(state), advisor)
-            policy_value = oracle._estimate_action_value(state, decision, advisor, evaluation_seeds)
+            matched = _decisions_match(decision, oracle_decision)
+            if matched:
+                policy_value = oracle_value
+            else:
+                policy_value = oracle._estimate_action_value(
+                    state,
+                    decision,
+                    advisor,
+                    evaluation_seeds,
+                    decision_cache=decision_cache,
+                )
             records.append(
                 OracleComparisonRecord(
                     policy_name=policy.name,
-                    matched_oracle=_decisions_match(decision, oracle_decision),
+                    matched_oracle=matched,
                     regret=max(0.0, oracle_value - policy_value),
                     turn_index=snapshot.turn_index,
                     roll_number=snapshot.roll_number,
@@ -177,6 +215,26 @@ def compare_policies_to_oracle(
                 )
             )
     return records
+
+
+def _decision_cache_key(
+    state: GameState,
+    decision: PolicyDecision,
+    rollout_seeds: list[int],
+    continuation_name: str | None,
+) -> DecisionKey:
+    action = decision.action_type.value
+    held = tuple(decision.held_dice or ())
+    category = decision.category.value if decision.category is not None else None
+    return (
+        state.scorecard.score_signature(),
+        tuple(state.current_dice),
+        state.roll_number,
+        state.turn_index,
+        f"{action}|{held}|{category}",
+        tuple(rollout_seeds),
+        continuation_name,
+    )
 
 
 def _decisions_match(a: PolicyDecision, b: PolicyDecision) -> bool:
