@@ -45,6 +45,7 @@ SETTING_KEYS = {
 
 SESSION_RESULT_KEY = "benchmark_analysis_result"
 SESSION_PRESET_KEY = "benchmark_analysis_preset"
+LAST_APPLIED_PRESET_KEY = "benchmark_last_applied_preset"
 
 
 def _seed_controls_from_settings(settings: BenchmarkSettings) -> None:
@@ -99,15 +100,20 @@ st.info(
 
 if SESSION_PRESET_KEY not in st.session_state:
     st.session_state[SESSION_PRESET_KEY] = "Fast Check"
+
+if LAST_APPLIED_PRESET_KEY not in st.session_state:
     _seed_controls_from_settings(PRESETS["Fast Check"])
+    st.session_state[LAST_APPLIED_PRESET_KEY] = "Fast Check"
 
 with st.container(border=True):
     st.subheader("Run Settings")
     st.markdown("**Basic settings**")
 
     selected_preset = st.selectbox("Preset", PRESET_OPTIONS, key=SESSION_PRESET_KEY)
-    if selected_preset in PRESETS:
+
+    if selected_preset in PRESETS and st.session_state[LAST_APPLIED_PRESET_KEY] != selected_preset:
         _seed_controls_from_settings(PRESETS[selected_preset])
+        st.session_state[LAST_APPLIED_PRESET_KEY] = selected_preset
 
     basic_cols = st.columns(2)
     with basic_cols[0]:
@@ -138,7 +144,9 @@ with st.container(border=True):
 
     settings = _load_selected_settings()
     derived_preset = preset_name_for_settings(settings, PRESETS)
-    st.session_state[SESSION_PRESET_KEY] = derived_preset
+
+    st.caption("Current preset match")
+    st.write(derived_preset)
 
     run_text, cost_text = settings_summary_text(settings)
     st.caption(run_text)
@@ -197,10 +205,12 @@ for row in full_rows:
             "Strategy": row["Strategy"],
             "Average Final Score": row["Average Final Score"],
             "Most Consistent (Low-end Score P10)": row["Low-end Score (P10)"],
-            "Matched Best-Known Choice": 0.0 if not oracle_row else oracle_row["Matched Best-Known Choice (oracle agreement rate)"],
-            "Average Points Lost vs Best-Known Choice": 0.0 if not oracle_row else oracle_row[
-                "Average Points Lost vs Best-Known Choice (regret)"
-            ],
+            "Matched Best-Known Choice": 0.0
+            if not oracle_row
+            else oracle_row["Matched Best-Known Choice (oracle agreement rate)"],
+            "Average Points Lost vs Best-Known Choice": 0.0
+            if not oracle_row
+            else oracle_row["Average Points Lost vs Best-Known Choice (regret)"],
         }
     )
 st.dataframe(simple_view, use_container_width=True)
