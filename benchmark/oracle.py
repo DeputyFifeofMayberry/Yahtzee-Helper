@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import random
 from dataclasses import dataclass
+from typing import Callable
 
 from .models import DecisionStateSnapshot, OracleComparisonRecord, PolicyDecision
 from .policies import Policy
@@ -167,13 +168,15 @@ def compare_policies_to_oracle(
     oracle: RolloutOraclePolicy,
     advisor: YahtzeeAdvisor | None = None,
     evaluation_rollouts: int | None = None,
+    on_progress: Callable[[int, int], None] | None = None,
 ) -> list[OracleComparisonRecord]:
     advisor = advisor or YahtzeeAdvisor()
     records: list[OracleComparisonRecord] = []
     decision_cache: dict[DecisionKey, float] = {}
     state_decision_cache: dict[tuple[str, tuple[int, ...], int, int], PolicyDecision] = {}
 
-    for snapshot in snapshots:
+    total_states = len(snapshots)
+    for idx, snapshot in enumerate(snapshots, start=1):
         state = state_from_snapshot(snapshot)
         state_key = (snapshot.score_signature, snapshot.dice, snapshot.roll_number, snapshot.turn_index)
         oracle_decision = state_decision_cache.get(state_key)
@@ -214,6 +217,8 @@ def compare_policies_to_oracle(
                     tags=snapshot.tags,
                 )
             )
+        if on_progress is not None:
+            on_progress(idx, total_states)
     return records
 
 
