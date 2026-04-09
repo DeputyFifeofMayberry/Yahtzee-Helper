@@ -188,3 +188,29 @@ def test_board_utility_does_not_blindly_burn_chance_early_on_poor_roll():
     rec = advisor.recommend([1, 1, 2, 2, 3], 3, sc, objective=OptimizationObjective.BOARD_UTILITY)
     assert rec.best_action.action_type == ActionType.SCORE_NOW
     assert rec.best_action.category != Category.CHANCE
+
+
+def test_best_score_now_raises_clear_error_when_no_categories_remain():
+    advisor = YahtzeeAdvisor()
+    sc = Scorecard()
+    for category in sc.scores:
+        sc.scores[category] = 0
+
+    try:
+        advisor.best_score_now((1, 1, 1, 1, 1), sc)
+        assert False, "expected best_score_now to fail on a complete scorecard"
+    except ValueError as exc:
+        assert "game is complete" in str(exc)
+
+
+def test_recommend_raises_clear_error_when_scorecard_is_complete():
+    advisor = YahtzeeAdvisor()
+    sc = Scorecard()
+    for category in sc.scores:
+        sc.scores[category] = 0
+
+    try:
+        advisor.recommend([1, 1, 1, 1, 1], 1, sc)
+        assert False, "expected recommend to fail on a complete scorecard"
+    except ValueError as exc:
+        assert "game is complete" in str(exc)

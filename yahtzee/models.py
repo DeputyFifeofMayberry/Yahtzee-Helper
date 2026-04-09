@@ -68,6 +68,10 @@ class Scorecard:
     def filled_categories(self) -> list[Category]:
         return [c for c in ALL_CATEGORIES if self.scores[c] is not None]
 
+    @property
+    def is_complete(self) -> bool:
+        return len(self.filled_categories()) == len(ALL_CATEGORIES)
+
     def open_upper_categories(self) -> list[Category]:
         return [c for c in UPPER_CATEGORIES if self.scores[c] is None]
 
@@ -154,6 +158,10 @@ class GameState:
     current_dice: list[int] = field(default_factory=lambda: [1, 1, 1, 1, 1])
     roll_number: int = 1
     history: list[TurnRecord] = field(default_factory=list)
+
+    @property
+    def is_game_over(self) -> bool:
+        return self.scorecard.is_complete
 
     def to_dict(self) -> dict[str, Any]:
         return {

@@ -63,6 +63,8 @@ class YahtzeeAdvisor:
         scorecard: Scorecard,
         objective: OptimizationObjective = OptimizationObjective.BOARD_UTILITY,
     ) -> Recommendation:
+        if scorecard.is_complete:
+            raise ValueError("No legal scoring categories remain; the game is complete.")
         cdice = canonical_dice(dice)
         rolls_remaining = max(0, 3 - roll_number)
         best_stop_category, best_stop_utility, best_stop_score = self.best_score_now(cdice, scorecard)
@@ -120,6 +122,8 @@ class YahtzeeAdvisor:
 
     def best_score_now(self, dice: tuple[int, ...], scorecard: Scorecard) -> tuple[Category, float, int]:
         legal_categories = scorecard.legal_scoring_categories(dice)
+        if not legal_categories:
+            raise ValueError("No legal scoring categories remain; the game is complete.")
         best_cat = legal_categories[0]
         best_utility = float("-inf")
         best_score = 0
