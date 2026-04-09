@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from yahtzee.models import Category, GameState
+from yahtzee.models import ALL_CATEGORIES, Category, GameState
 from yahtzee.persistence import load_game, save_game
 from yahtzee.state import GameManager
 
@@ -56,3 +56,37 @@ def test_undo_restores_current_visible_dice_order():
     assert m.undo()
     assert m.state.current_dice == [5, 4, 2, 4, 1]
     assert m.state.roll_number == 3
+
+
+def test_scorecard_and_game_state_report_complete_when_all_categories_filled():
+    m = GameManager(GameState())
+    for category in ALL_CATEGORIES:
+        m.state.scorecard.scores[category] = 0
+    assert m.state.scorecard.is_complete
+    assert m.state.is_game_over
+
+
+def test_undo_after_completed_game_returns_to_playable_state():
+    m = GameManager(GameState())
+    m.state.scorecard.scores[Category.CHANCE] = None
+    for category in ALL_CATEGORIES:
+        if category != Category.CHANCE:
+            m.state.scorecard.scores[category] = 0
+    m.set_current_roll([6, 5, 4, 3, 2], 3)
+    m.apply_score(Category.CHANCE)
+    assert m.state.is_game_over
+    assert m.undo()
+    assert not m.state.is_game_over
+    assert m.state.scorecard.scores[Category.CHANCE] is None
+
+
+def test_loading_finished_game_sets_game_over_state(tmp_path: Path):
+    p = tmp_path / "finished.json"
+    m = GameManager(GameState())
+    for category in ALL_CATEGORIES:
+        m.state.scorecard.scores[category] = 0
+    save_game(m.state, str(p))
+
+    loaded = load_game(str(p))
+    assert loaded.scorecard.is_complete
+    assert loaded.is_game_over
