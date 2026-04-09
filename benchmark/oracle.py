@@ -3,9 +3,9 @@ from __future__ import annotations
 import random
 from dataclasses import dataclass
 
-from benchmark.models import DecisionStateSnapshot, OracleComparisonRecord, PolicyDecision
-from benchmark.policies import Policy
-from benchmark.simulator import apply_decision_once, clone_state, ensure_active_roll
+from .models import DecisionStateSnapshot, OracleComparisonRecord, PolicyDecision
+from .policies import Policy
+from .simulator import apply_decision_once, clone_state, ensure_active_roll
 from yahtzee.advisor import YahtzeeAdvisor
 from yahtzee.models import ActionType, GameState, OptimizationObjective, Scorecard
 from yahtzee.state import GameManager

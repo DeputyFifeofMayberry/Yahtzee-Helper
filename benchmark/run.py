@@ -8,11 +8,11 @@ from dataclasses import asdict, dataclass, replace
 from io import StringIO
 from typing import Callable, Literal
 
-from benchmark.metrics import summarize_game_results, summarize_oracle_results
-from benchmark.models import GameSimulationResult, OracleComparisonRecord
-from benchmark.oracle import RolloutOraclePolicy, compare_policies_to_oracle
-from benchmark.policies import HumanHeuristicPolicy, ObjectivePolicy, Policy
-from benchmark.simulator import sample_state_corpus, simulate_full_game
+from .metrics import summarize_game_results, summarize_oracle_results
+from .models import GameSimulationResult, OracleComparisonRecord
+from .oracle import RolloutOraclePolicy, compare_policies_to_oracle
+from .policies import HumanHeuristicPolicy, ObjectivePolicy, Policy
+from .simulator import sample_state_corpus, simulate_full_game
 from yahtzee.advisor import YahtzeeAdvisor
 from yahtzee.models import OptimizationObjective
 

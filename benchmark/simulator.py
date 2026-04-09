@@ -4,8 +4,8 @@ import random
 from collections import Counter
 from copy import deepcopy
 
-from benchmark.models import DecisionStateSnapshot, GameSimulationResult, PolicyDecision
-from benchmark.policies import Policy
+from .models import DecisionStateSnapshot, GameSimulationResult, PolicyDecision
+from .policies import Policy
 from yahtzee.advisor import YahtzeeAdvisor
 from yahtzee.models import Category, GameState, Scorecard
 from yahtzee.rules import is_full_house, is_large_straight, is_n_of_a_kind, is_small_straight, is_yahtzee
