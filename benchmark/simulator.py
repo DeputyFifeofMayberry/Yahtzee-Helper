@@ -3,6 +3,7 @@ from __future__ import annotations
 import random
 from collections import Counter
 from copy import deepcopy
+from typing import Callable
 
 from .models import DecisionStateSnapshot, GameSimulationResult, PolicyDecision
 from .policies import Policy
@@ -157,9 +158,12 @@ def sample_state_corpus(
     seed: int,
     advisor: YahtzeeAdvisor | None = None,
     state_sample_rate: float = 0.35,
+    on_progress: Callable[[int, int], None] | None = None,
 ) -> list[DecisionStateSnapshot]:
     advisor = advisor or YahtzeeAdvisor()
     corpus: list[DecisionStateSnapshot] = []
+    total_games = len(policies) * max(0, games_per_policy)
+    done = 0
     for offset, policy in enumerate(policies):
         for game_idx in range(games_per_policy):
             game_seed = seed + (offset * 1_000_000) + game_idx
@@ -170,4 +174,7 @@ def sample_state_corpus(
                 state_sample_rate=state_sample_rate,
             )
             corpus.extend(result.sampled_states)
+            done += 1
+            if on_progress is not None:
+                on_progress(done, total_games)
     return corpus
