@@ -1,6 +1,13 @@
 # Changelog
 
 ## 2026-04-09
+- Refactored the main Streamlit app analysis flow so initial page render no longer auto-runs turn recommendations for placeholder `[1, 1, 1, 1, 1]` dice.
+- Added turn-analysis fingerprints + session-state invalidation to reuse recommendations across reruns and only refresh when dice, roll, scorecard, or objective actually changes.
+- Added an app-level cached recommendation service and lazy exact-outcome breakdown computation for the selected best hold only.
+- Updated objective UX labels/help to clarify that exact turn EV is slower and now marks recommendations stale until users explicitly refresh.
+- Refactored advisor recommendation generation to avoid computing exact outcome probabilities for every hold candidate by default.
+- Added tests covering fingerprint invalidation, analysis state reset/stale behavior, and advisor lazy probability computation path.
+
 - Fixed a Streamlit startup import crash on `pages/Benchmark_Analysis.py` by removing eager benchmark package re-exports and stabilizing module initialization order.
 - Hardened the `benchmark` package by converting intra-package imports to explicit relative imports to avoid partial initialization and circular import fragility.
 - Replaced eager `benchmark.__init__` exports with a minimal package marker to remove implicit import-order coupling.

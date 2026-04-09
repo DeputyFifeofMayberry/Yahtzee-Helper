@@ -62,6 +62,9 @@ class YahtzeeAdvisor:
         roll_number: int,
         scorecard: Scorecard,
         objective: OptimizationObjective = OptimizationObjective.BOARD_UTILITY,
+        *,
+        include_probabilities: bool = False,
+        top_n: int = 3,
     ) -> Recommendation:
         if scorecard.is_complete:
             raise ValueError("No legal scoring categories remain; the game is complete.")
@@ -73,7 +76,6 @@ class YahtzeeAdvisor:
         if rolls_remaining > 0:
             for hold in distinct_holds(cdice):
                 exact_ev, total_utility, yahtzee_probability = self.hold_metrics(hold, rolls_remaining, scorecard, objective)
-                probs = self.optimal_turn_outcome_probabilities(hold, rolls_remaining, scorecard, objective)
                 held_str = ", ".join(map(str, hold)) if hold else "nothing"
                 candidates.append(
                     CandidateAction(
@@ -83,7 +85,6 @@ class YahtzeeAdvisor:
                         exact_turn_ev=exact_ev,
                         board_adjustment=total_utility - exact_ev,
                         description=f"Hold {held_str}, reroll {5 - len(hold)} dice.",
-                        probabilities=probs,
                         yahtzee_probability=yahtzee_probability,
                     )
                 )
@@ -108,10 +109,12 @@ class YahtzeeAdvisor:
 
         ranked = sorted(candidates, key=lambda c: self._candidate_sort_key(c, objective), reverse=True)
         best = ranked[0]
+        if include_probabilities and best.action_type == ActionType.HOLD_AND_REROLL and best.held_dice is not None:
+            best.probabilities = self.optimal_turn_outcome_probabilities(best.held_dice, rolls_remaining, scorecard, objective)
         explanation = self._explain(best, best_stop_category, roll_number, objective, cdice, scorecard)
         return Recommendation(
             best_action=best,
-            top_actions=ranked[:3],
+            top_actions=ranked[: max(1, int(top_n))],
             best_stop_category=best_stop_category,
             best_stop_score=best_stop_score,
             explanation=explanation,
