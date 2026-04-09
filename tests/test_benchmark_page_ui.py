@@ -8,7 +8,7 @@ def test_page_imports_successfully():
 
 
 def test_strategy_mapping_complete_and_user_facing():
-    expected = {"board_utility", "exact_turn_ev", "human_heuristic", "rollout_oracle"}
+    expected = {"board_utility", "exact_turn_ev", "human_heuristic", "rollout_reference"}
     assert expected.issubset(set(STRATEGY_METADATA.keys()))
     rows = strategy_summary_rows(["board_utility", "human_heuristic"])
     assert rows[0]["Strategy"] != "board_utility"
