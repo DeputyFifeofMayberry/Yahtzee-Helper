@@ -4,9 +4,18 @@ from dataclasses import asdict
 
 import streamlit as st
 
+from benchmark.page_helpers import (
+    flatten_full_summary,
+    flatten_oracle_summary,
+    preset_name_for_settings,
+    results_takeaway,
+    settings_summary_text,
+)
 from benchmark.run import (
+    MODE_PROFILES,
     BenchmarkRunResult,
     BenchmarkSettings,
+    browser_guardrail_warnings,
     full_game_results_rows,
     oracle_records_rows,
     rows_to_csv,
@@ -14,37 +23,15 @@ from benchmark.run import (
     summary_to_json,
 )
 
-st.set_page_config(page_title="Benchmark Analysis", layout="wide")
+st.set_page_config(page_title="Strategy Test Lab", layout="wide")
 
 PRESETS: dict[str, BenchmarkSettings] = {
-    "Quick": BenchmarkSettings(
-        full_games=40,
-        oracle_games=12,
-        state_sample_games=16,
-        state_sample_size=36,
-        state_sample_rate=0.2,
-        oracle_rollouts=12,
-        seed=1337,
-    ),
-    "Standard": BenchmarkSettings(
-        full_games=100,
-        oracle_games=24,
-        state_sample_games=36,
-        state_sample_size=72,
-        state_sample_rate=0.3,
-        oracle_rollouts=24,
-        seed=1337,
-    ),
-    "Deep": BenchmarkSettings(
-        full_games=220,
-        oracle_games=50,
-        state_sample_games=65,
-        state_sample_size=120,
-        state_sample_rate=0.4,
-        oracle_rollouts=45,
-        seed=1337,
-    ),
+    "Fast Check": MODE_PROFILES["fast"],
+    "Standard Comparison": MODE_PROFILES["standard"],
+    "Deep Analysis": MODE_PROFILES["deep"],
 }
+
+PRESET_OPTIONS = ["Fast Check", "Standard Comparison", "Deep Analysis", "Custom (edited)"]
 
 SETTING_KEYS = {
     "full_games": "bench_full_games",
@@ -99,200 +86,245 @@ def _safe_metric(summary: dict[str, object] | None, key: str) -> float:
         return 0.0
 
 
-def _collect_policies(run_data: dict[str, object]) -> list[str]:
-    full_keys = set((run_data.get("full_game_summary") or {}).keys())
-    oracle_keys = set((run_data.get("oracle_summary") or {}).keys())
-    return sorted(full_keys | oracle_keys)
+st.title("🎯 Strategy Test Lab")
+st.caption("Compare Yahtzee strategies with a fast browser-friendly check or a deeper analysis run.")
 
-
-st.title("📊 Benchmark Analysis")
-st.caption("Run policy benchmarks in-browser and inspect full-game plus oracle-comparison performance.")
+st.info(
+    "**How to read this page**\n\n"
+    "- Higher **Average Final Score** is better.\n"
+    "- Higher **Matched Best-Known Choice** percentage is better.\n"
+    "- Lower **Average Points Lost vs Best-Known Choice** is better.\n"
+    "- **Fast Check** is for quick feedback; deeper modes take much longer."
+)
 
 if SESSION_PRESET_KEY not in st.session_state:
-    st.session_state[SESSION_PRESET_KEY] = "Quick"
-    _seed_controls_from_settings(PRESETS["Quick"])
+    st.session_state[SESSION_PRESET_KEY] = "Fast Check"
+    _seed_controls_from_settings(PRESETS["Fast Check"])
 
 with st.container(border=True):
-    st.subheader("Benchmark Controls")
-    preset = st.selectbox("Preset", ["Quick", "Standard", "Deep", "Custom"], key=SESSION_PRESET_KEY)
+    st.subheader("Run Settings")
+    st.markdown("**Basic settings**")
 
-    if preset != "Custom":
-        _seed_controls_from_settings(PRESETS[preset])
+    selected_preset = st.selectbox("Preset", PRESET_OPTIONS, key=SESSION_PRESET_KEY)
+    if selected_preset in PRESETS:
+        _seed_controls_from_settings(PRESETS[selected_preset])
 
-    disabled = preset != "Custom"
-    c1, c2, c3, c4 = st.columns(4)
-    with c1:
-        st.number_input("Full games", min_value=1, step=1, key=SETTING_KEYS["full_games"], disabled=disabled)
-        st.number_input("Oracle games", min_value=1, step=1, key=SETTING_KEYS["oracle_games"], disabled=disabled)
-    with c2:
-        st.number_input("State sample games", min_value=1, step=1, key=SETTING_KEYS["state_sample_games"], disabled=disabled)
-        st.number_input("State sample size", min_value=1, step=1, key=SETTING_KEYS["state_sample_size"], disabled=disabled)
-    with c3:
-        st.number_input(
-            "State sample rate",
-            min_value=0.01,
-            max_value=1.0,
-            step=0.01,
-            format="%.2f",
-            key=SETTING_KEYS["state_sample_rate"],
-            disabled=disabled,
-        )
-        st.number_input("Oracle rollouts", min_value=1, step=1, key=SETTING_KEYS["oracle_rollouts"], disabled=disabled)
-    with c4:
+    basic_cols = st.columns(2)
+    with basic_cols[0]:
         st.number_input("Seed", min_value=0, step=1, key=SETTING_KEYS["seed"])
+    with basic_cols[1]:
+        st.caption("Run Type")
+        st.write(selected_preset)
 
-    st.info(
-        "Runtime note: rollout_oracle is intentionally expensive. Larger oracle rollouts and sample sizes can be much slower. "
-        "For browser use, Quick or Standard presets are usually best."
-    )
+    with st.expander("Advanced settings", expanded=False):
+        st.markdown("**Advanced settings**")
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            st.number_input("Full games", min_value=1, step=1, key=SETTING_KEYS["full_games"])
+            st.number_input("Oracle games", min_value=0, step=1, key=SETTING_KEYS["oracle_games"])
+        with c2:
+            st.number_input("State sample games", min_value=0, step=1, key=SETTING_KEYS["state_sample_games"])
+            st.number_input("State sample size", min_value=0, step=1, key=SETTING_KEYS["state_sample_size"])
+        with c3:
+            st.number_input(
+                "State sample rate",
+                min_value=0.01,
+                max_value=1.0,
+                step=0.01,
+                format="%.2f",
+                key=SETTING_KEYS["state_sample_rate"],
+            )
+            st.number_input("Oracle rollouts", min_value=0, step=1, key=SETTING_KEYS["oracle_rollouts"])
 
-    run_clicked = st.button("Run Benchmark", type="primary", use_container_width=True)
+    settings = _load_selected_settings()
+    derived_preset = preset_name_for_settings(settings, PRESETS)
+    st.session_state[SESSION_PRESET_KEY] = derived_preset
+
+    run_text, cost_text = settings_summary_text(settings)
+    st.caption(run_text)
+    st.caption(cost_text)
+
+    for warning in browser_guardrail_warnings(settings):
+        st.warning(warning)
+
+    run_clicked = st.button("Run Strategy Comparison", type="primary", use_container_width=True)
 
 if run_clicked:
     try:
         settings = _load_selected_settings()
-        progress = st.progress(0.0, text="Starting benchmark...")
-        with st.status("Benchmark in progress", expanded=True) as status:
+        progress = st.progress(0.0, text="Starting run...")
+        with st.status("Run in progress", expanded=True) as status:
 
             def _on_progress(label: str, pct: float) -> None:
                 progress.progress(pct, text=label)
                 status.write(f"{int(pct * 100)}% — {label}")
 
-            result = run_benchmark(settings, on_progress=_on_progress)
+            mode = "deep"
+            if settings == PRESETS["Fast Check"]:
+                mode = "fast"
+            elif settings == PRESETS["Standard Comparison"]:
+                mode = "standard"
 
+            result = run_benchmark(settings, on_progress=_on_progress, mode=mode)
             st.session_state[SESSION_RESULT_KEY] = _result_to_session_payload(result)
-            status.update(label="Benchmark completed", state="complete", expanded=False)
-            progress.progress(1.0, text="Benchmark completed")
+            status.update(label="Run complete", state="complete", expanded=False)
+            progress.progress(1.0, text="Run complete")
     except ValueError as exc:
         st.error(f"Unable to run benchmark: {exc}")
 
 run_data = st.session_state.get(SESSION_RESULT_KEY)
 if not run_data:
-    st.warning("No benchmark results yet. Configure settings above and run a benchmark.")
+    st.warning("No run results yet. Configure settings above and run a strategy comparison.")
     st.stop()
 
 st.success(
-    f"Loaded results for settings: {run_data['settings']} | state corpus={run_data['state_corpus_size']} | "
-    f"states compared={run_data['states_compared']}"
+    f"Loaded run with sampled test states: {run_data['states_compared']} out of {run_data['state_corpus_size']} captured states."
 )
 
 full_summary = run_data.get("full_game_summary", {})
 oracle_summary = run_data.get("oracle_summary", {})
-policies = _collect_policies(run_data)
+full_rows = flatten_full_summary(full_summary)
+oracle_rows = flatten_oracle_summary(oracle_summary)
 
-st.header("Executive Summary")
-exec_rows: list[dict[str, float | str]] = []
-for policy_name in policies:
-    game = full_summary.get(policy_name)
-    oracle = oracle_summary.get(policy_name)
-    exec_rows.append(
+st.header("Best Overall Results")
+st.info(results_takeaway(full_rows, oracle_rows))
+
+simple_view = []
+for row in full_rows:
+    oracle_row = next((item for item in oracle_rows if item["Strategy"] == row["Strategy"]), None)
+    simple_view.append(
         {
-            "policy": policy_name,
-            "avg_final_score": _safe_metric(game, "average_final_score"),
-            "median_final_score": _safe_metric(game, "median_final_score"),
-            "p90_final_score": _safe_metric(game, "p90_final_score"),
-            "upper_bonus_hit_rate": _safe_metric(game, "upper_bonus_hit_rate"),
-            "yahtzee_rate": _safe_metric(game, "yahtzee_rate"),
-            "avg_zeros_per_game": _safe_metric(game, "average_zeros_per_game"),
-            "oracle_agreement_rate": _safe_metric(oracle, "oracle_agreement_rate"),
-            "avg_regret": _safe_metric(oracle, "average_regret"),
+            "Strategy": row["Strategy"],
+            "Average Final Score": row["Average Final Score"],
+            "Most Consistent (Low-end Score P10)": row["Low-end Score (P10)"],
+            "Matched Best-Known Choice": 0.0 if not oracle_row else oracle_row["Matched Best-Known Choice (oracle agreement rate)"],
+            "Average Points Lost vs Best-Known Choice": 0.0 if not oracle_row else oracle_row[
+                "Average Points Lost vs Best-Known Choice (regret)"
+            ],
         }
     )
-st.dataframe(exec_rows, use_container_width=True)
+st.dataframe(simple_view, use_container_width=True)
 
-st.header("Charts")
-chart_cols = st.columns(2)
-with chart_cols[0]:
-    st.caption("Average final score by policy")
-    st.bar_chart({row["policy"]: row["avg_final_score"] for row in exec_rows})
-    st.caption("Upper bonus hit rate by policy")
-    st.bar_chart({row["policy"]: row["upper_bonus_hit_rate"] for row in exec_rows})
-    st.caption("Yahtzee rate by policy")
-    st.bar_chart({row["policy"]: row["yahtzee_rate"] for row in exec_rows})
-with chart_cols[1]:
-    st.caption("Oracle agreement rate by policy")
-    st.bar_chart({row["policy"]: row["oracle_agreement_rate"] for row in exec_rows})
-    st.caption("Average regret by policy")
-    st.bar_chart({row["policy"]: row["avg_regret"] for row in exec_rows})
+st.header("How Each Strategy Scored")
+st.dataframe(full_rows, use_container_width=True)
 
-st.header("Full-game Performance")
-st.dataframe(full_summary, use_container_width=True)
-with st.expander("Full-game details"):
-    for policy_name in policies:
-        summary = full_summary.get(policy_name)
-        if not summary:
-            continue
-        st.subheader(policy_name)
-        metric_cols = st.columns(4)
-        metric_cols[0].metric("P10 / P90", f"{summary.get('p10_final_score', 0)} / {summary.get('p90_final_score', 0)}")
-        metric_cols[1].metric("Min / Max", f"{summary.get('min_final_score', 0)} / {summary.get('max_final_score', 0)}")
-        metric_cols[2].metric("Avg upper subtotal", f"{summary.get('average_upper_subtotal', 0)}")
-        metric_cols[3].metric("Extra Yahtzee bonus rate", f"{summary.get('extra_yahtzee_bonus_rate', 0):.1%}")
-        st.caption("Zero rate by category")
-        st.dataframe(summary.get("zero_rate_by_category", {}), use_container_width=True)
-        st.caption("Average score by category")
-        st.dataframe(summary.get("average_score_by_category", {}), use_container_width=True)
-
-st.header("Oracle Comparison")
-if not oracle_summary:
-    st.warning("No oracle comparison rows were generated for this run.")
+if oracle_rows:
+    st.header("How Often Each Strategy Matched the Best Known Choice")
+    st.caption(
+        "Matched Best-Known Choice (oracle agreement rate): share of sampled test states where the strategy picked "
+        "the same action as the best-known reference."
+    )
+    st.caption(
+        "Average Points Lost vs Best-Known Choice (regret): average score difference compared with the best-known "
+        "choice on sampled states. Lower is better."
+    )
+    st.caption("Low-end / High-end Score Range: P10/P90 shows typical worst-case and strong-case outcomes.")
+    st.caption("Sampled test states: number of in-game decisions used in the best-known-choice comparison.")
+    st.dataframe(oracle_rows, use_container_width=True)
 else:
-    st.dataframe(oracle_summary, use_container_width=True)
-    with st.expander("Oracle details and slices"):
-        for policy_name in policies:
-            summary = oracle_summary.get(policy_name)
-            if not summary:
-                continue
-            st.subheader(policy_name)
-            mcols = st.columns(3)
-            mcols[0].metric("Agreement", f"{_safe_metric(summary, 'oracle_agreement_rate'):.1%}")
-            mcols[1].metric("Avg regret", f"{_safe_metric(summary, 'average_regret'):.3f}")
-            mcols[2].metric("Median / P90 regret", f"{_safe_metric(summary, 'median_regret'):.3f} / {_safe_metric(summary, 'p90_regret'):.3f}")
-            mcols2 = st.columns(2)
-            mcols2[0].metric("Severe miss >3", f"{_safe_metric(summary, 'severe_miss_rate_gt_3'):.1%}")
-            mcols2[1].metric("Severe miss >5", f"{_safe_metric(summary, 'severe_miss_rate_gt_5'):.1%}")
+    st.info("This run skipped best-known-choice comparison to keep the run fast.")
 
-            st.caption("By roll number")
-            st.dataframe(summary.get("by_roll_number", {}), use_container_width=True)
+with st.expander("Detailed strategy metrics", expanded=False):
+    for policy_name, summary in sorted(full_summary.items()):
+        st.subheader(policy_name)
+        metric_cols = st.columns(3)
+        metric_cols[0].metric(
+            "Low-end / High-end Score Range",
+            f"{summary.get('p10_final_score', 0)} / {summary.get('p90_final_score', 0)}",
+            help="This shows a practical low-end and high-end score range, not the absolute min and max.",
+        )
+        metric_cols[1].metric(
+            "Extra Yahtzee bonus rate",
+            f"{summary.get('extra_yahtzee_bonus_rate', 0):.1%}",
+            help="How often a game earned at least one extra Yahtzee bonus.",
+        )
+        metric_cols[2].metric(
+            "Average zeros per game",
+            f"{summary.get('average_zeros_per_game', 0):.2f}",
+            help="Average number of boxes that ended up as zero in a completed game.",
+        )
 
-            st.caption("By tag / state type")
-            st.dataframe(summary.get("by_tag", {}), use_container_width=True)
+        zero_rows = [
+            {"Category": category, "How Often This Box Ended Up as 0": rate}
+            for category, rate in sorted(summary.get("zero_rate_by_category", {}).items())
+        ]
+        score_rows = [
+            {"Category": category, "Average Score": score}
+            for category, score in sorted(summary.get("average_score_by_category", {}).items())
+        ]
+        st.caption("How Often This Box Ended Up as 0")
+        st.dataframe(zero_rows, use_container_width=True)
+        st.caption("Average Score by Category")
+        st.dataframe(score_rows, use_container_width=True)
 
-st.header("Downloads")
-full_rows = run_data.get("full_game_results", [])
-oracle_rows = run_data.get("oracle_records", [])
+with st.expander("Detailed Decision Comparison Data", expanded=False):
+    if not oracle_summary:
+        st.caption("No detailed decision comparison data for this run.")
+    for policy_name, summary in sorted(oracle_summary.items()):
+        st.subheader(policy_name)
+        mcols = st.columns(3)
+        mcols[0].metric(
+            "Matched Best-Known Choice (oracle agreement rate)",
+            f"{_safe_metric(summary, 'oracle_agreement_rate'):.1%}",
+            help="How often this strategy picked the same move as the best-known reference.",
+        )
+        mcols[1].metric(
+            "Average Points Lost vs Best-Known Choice (regret)",
+            f"{_safe_metric(summary, 'average_regret'):.3f}",
+            help="Average points lost compared with the best-known move in sampled situations.",
+        )
+        mcols[2].metric("Sampled test states", int(_safe_metric(summary, "comparisons")))
 
-download_cols = st.columns(4)
-download_cols[0].download_button(
-    "Download full-game CSV",
-    data=rows_to_csv(full_rows),
-    file_name="full_game_results.csv",
-    mime="text/csv",
-)
-download_cols[1].download_button(
-    "Download oracle CSV",
-    data=rows_to_csv(oracle_rows),
-    file_name="oracle_comparisons.csv",
-    mime="text/csv",
-)
-download_cols[2].download_button(
-    "Download full-game summary JSON",
-    data=summary_to_json(full_summary),
-    file_name="full_game_summary.json",
-    mime="application/json",
-)
-download_cols[3].download_button(
-    "Download oracle summary JSON",
-    data=summary_to_json(oracle_summary),
-    file_name="oracle_summary.json",
-    mime="application/json",
-)
+        by_roll_rows = []
+        for roll_name, values in sorted((summary.get("by_roll_number") or {}).items()):
+            by_roll_rows.append(
+                {
+                    "Roll": roll_name,
+                    "Matched Best-Known Choice": values.get("oracle_agreement_rate", 0.0),
+                    "Average Points Lost": values.get("average_regret", 0.0),
+                    "High-end Points Lost (P90)": values.get("p90_regret", 0.0),
+                    "Samples": values.get("count", 0.0),
+                }
+            )
+        st.caption("Breakdown by Roll Number")
+        st.dataframe(by_roll_rows, use_container_width=True)
 
-with st.expander("Raw full-game result rows"):
-    st.dataframe(full_rows, use_container_width=True)
+        by_tag_rows = []
+        for tag, values in sorted((summary.get("by_tag") or {}).items()):
+            by_tag_rows.append(
+                {
+                    "State Type": tag,
+                    "Matched Best-Known Choice": values.get("oracle_agreement_rate", 0.0),
+                    "Average Points Lost": values.get("average_regret", 0.0),
+                    "High-end Points Lost (P90)": values.get("p90_regret", 0.0),
+                    "Samples": values.get("count", 0.0),
+                }
+            )
+        st.caption("Breakdown by State Type")
+        st.dataframe(by_tag_rows, use_container_width=True)
 
-with st.expander("Raw oracle comparison rows"):
-    if oracle_rows:
-        st.dataframe(oracle_rows, use_container_width=True)
-    else:
-        st.info("This run produced no oracle comparison rows.")
+with st.expander("Downloads", expanded=False):
+    st.download_button(
+        "Download full game rows (CSV)",
+        rows_to_csv(run_data.get("full_game_results", [])),
+        file_name="full_game_results.csv",
+        mime="text/csv",
+    )
+    st.download_button(
+        "Download decision comparison rows (CSV)",
+        rows_to_csv(run_data.get("oracle_records", [])),
+        file_name="oracle_comparisons.csv",
+        mime="text/csv",
+    )
+    st.download_button(
+        "Download full game summary (JSON)",
+        summary_to_json(full_summary),
+        file_name="full_game_summary.json",
+        mime="application/json",
+    )
+    st.download_button(
+        "Download decision summary (JSON)",
+        summary_to_json(oracle_summary),
+        file_name="oracle_summary.json",
+        mime="application/json",
+    )

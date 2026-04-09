@@ -1,7 +1,11 @@
 from benchmark.run import (
     BenchmarkSettings,
+    browser_guardrail_warnings,
+    estimate_run_cost,
     full_game_results_rows,
+    mode_allows_oracle,
     oracle_records_rows,
+    profile_settings,
     rows_to_csv,
     run_benchmark,
     summary_to_json,
@@ -35,6 +39,22 @@ def test_run_benchmark_returns_expected_shapes():
     }
 
 
+def test_fast_mode_can_skip_oracle_comparison_work():
+    settings = BenchmarkSettings(
+        full_games=2,
+        oracle_games=0,
+        state_sample_games=0,
+        state_sample_size=0,
+        state_sample_rate=0.1,
+        oracle_rollouts=0,
+        seed=12,
+    )
+    result = run_benchmark(settings, mode="fast")
+    assert not mode_allows_oracle(settings)
+    assert result.oracle_records == []
+    assert result.oracle_summary == {}
+
+
 def test_download_rows_and_serializers_are_stable():
     settings = BenchmarkSettings(
         full_games=1,
@@ -62,6 +82,24 @@ def test_download_rows_and_serializers_are_stable():
     oracle_json = summary_to_json(result.oracle_summary)
     assert "average_final_score" in full_json
     assert "oracle_agreement_rate" in oracle_json
+
+
+def test_profile_sizes_and_cost_levels_scale_up():
+    fast = profile_settings("fast", seed=3)
+    deep = profile_settings("deep", seed=3)
+    assert fast.full_games < deep.full_games
+    assert fast.state_sample_size < deep.state_sample_size
+
+    fast_cost, _, _ = estimate_run_cost(fast)
+    deep_cost, _, _ = estimate_run_cost(deep)
+    assert fast_cost in {"Fast", "Moderate"}
+    assert deep_cost in {"Moderate", "Heavy"}
+
+
+def test_guardrails_warn_for_heavy_runs():
+    heavy = BenchmarkSettings(full_games=300, state_sample_size=220, oracle_rollouts=70)
+    warnings = browser_guardrail_warnings(heavy)
+    assert warnings
 
 
 def test_invalid_settings_raise_friendly_error():

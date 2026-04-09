@@ -3,7 +3,9 @@ from random import Random
 from benchmark.metrics import summarize_game_results, summarize_oracle_results
 from benchmark.models import DecisionStateSnapshot, PolicyDecision
 from benchmark.oracle import RolloutOraclePolicy, compare_policies_to_oracle
+from benchmark.page_helpers import flatten_full_summary, flatten_oracle_summary, preset_name_for_settings
 from benchmark.policies import HumanHeuristicPolicy, ObjectivePolicy
+from benchmark.run import BenchmarkSettings, profile_settings
 from benchmark.simulator import apply_decision_once, classify_state, simulate_full_game
 from yahtzee.advisor import YahtzeeAdvisor
 from yahtzee.models import ActionType, Category, GameState, OptimizationObjective, Scorecard
@@ -63,6 +65,62 @@ def test_oracle_comparison_records_are_generated():
     records = compare_policies_to_oracle([snapshot], policies, oracle, advisor=advisor)
     assert len(records) == len(policies)
     assert {record.policy_name for record in records} == {"board_utility", "exact_turn_ev", "human_heuristic"}
+
+
+def test_oracle_comparison_caches_repeated_snapshot_evaluations():
+    advisor = YahtzeeAdvisor()
+    snapshot = DecisionStateSnapshot(
+        score_signature=Scorecard().score_signature(),
+        dice=(1, 1, 1, 2, 3),
+        roll_number=2,
+        turn_index=4,
+        tags=("phase_mid",),
+    )
+
+    class FixedPolicy:
+        name = "fixed"
+
+        def decide(self, state, advisor):
+            return PolicyDecision(ActionType.HOLD_AND_REROLL, held_dice=(1, 1, 1), description="hold triples")
+
+    policies = [FixedPolicy()]
+    oracle = RolloutOraclePolicy(rollouts_per_action=2)
+    oracle.decide = lambda state, advisor: PolicyDecision(  # type: ignore[method-assign]
+        ActionType.HOLD_AND_REROLL,
+        held_dice=(1, 1, 1),
+        description="hold triples",
+    )
+
+    call_counter = {"count": 0}
+
+    def fake_estimate(state, decision, advisor, rollout_seeds, decision_cache=None):
+        key = (state.scorecard.score_signature(), tuple(state.current_dice), tuple(rollout_seeds), tuple(decision.held_dice or ()))
+        if decision_cache is not None and key in decision_cache:
+            return decision_cache[key]
+        call_counter["count"] += 1
+        value = float(len(rollout_seeds))
+        if decision_cache is not None:
+            decision_cache[key] = value
+        return value
+
+    oracle._estimate_action_value = fake_estimate  # type: ignore[method-assign]
+    compare_policies_to_oracle([snapshot, snapshot], policies, oracle, advisor=advisor, evaluation_rollouts=2)
+    assert call_counter["count"] == 1
+
+
+def test_page_helper_flattens_and_detects_custom_edited_preset():
+    preset = profile_settings("fast", seed=7)
+    presets = {"Fast Check": preset}
+
+    assert preset_name_for_settings(preset, presets) == "Fast Check"
+    edited = BenchmarkSettings(**{**preset.__dict__, "full_games": preset.full_games + 1})
+    assert preset_name_for_settings(edited, presets) == "Custom (edited)"
+
+    game_rows = flatten_full_summary({"board_utility": summarize_game_results([])})
+    assert game_rows[0]["Strategy"] == "board_utility"
+
+    oracle_rows = flatten_oracle_summary({"board_utility": summarize_oracle_results([])})
+    assert oracle_rows[0]["Strategy"] == "board_utility"
 
 
 def test_summary_helpers_return_expected_shapes():
