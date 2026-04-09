@@ -41,6 +41,23 @@ The comparison is also sliced by:
 - upper bonus pressure
 - bailout states
 
+## In-app Benchmark Analysis page
+
+Benchmarks are also available inside Streamlit as a separate page:
+
+```bash
+streamlit run app.py
+```
+
+Then open **Benchmark Analysis** from the Streamlit pages sidebar.
+
+The in-app page uses the same benchmark backend (`benchmark/run.py`) as the CLI and supports:
+- Quick / Standard / Deep / Custom presets
+- browser-safe progress feedback
+- full-game and oracle summaries
+- sliced oracle views by roll and tag
+- CSV/JSON downloads generated in-memory
+
 ## How to run
 
 ```bash
