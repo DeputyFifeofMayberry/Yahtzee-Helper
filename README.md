@@ -151,6 +151,28 @@ State ownership is explicit:
 
 This prevents the previous first-click bounce-back/false-input issue caused by reruns repeatedly rebuilding widget defaults from backend state.
 
+## Benchmarking (CLI + in-app page)
+
+You can benchmark the four policies either from the CLI or inside Streamlit.
+
+### In-app benchmark dashboard
+
+Run the app:
+
+```bash
+streamlit run app.py
+```
+
+Then open **Benchmark Analysis** from the Streamlit page selector. This page is separate from gameplay and includes preset controls, progress updates, summaries, charts, and CSV/JSON downloads.
+
+### CLI benchmark harness
+
+```bash
+python scripts/run_benchmarks.py
+```
+
+See `BENCHMARKS.md` for full benchmark metrics and options.
+
 ## Install
 
 ```bash
